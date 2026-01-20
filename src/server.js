@@ -144,15 +144,10 @@ const handleRequest = async (req) => {
 
   // GET /tag/:id - Search for a PIPA tag
   // ?noCache=1 bypasses cache read (but still writes to cache)
-  // ?details=1 fetches detailed report data (user limits, dimensions, etc.)
   if (url.pathname.startsWith("/tag/")) {
     const tagId = url.pathname.slice(5);
     const useCache = !url.searchParams.has("noCache");
-    const includeReportDetails = url.searchParams.has("details");
-    const result = await searchTagWithCache(tagId, {
-      useCache,
-      includeReportDetails,
-    });
+    const result = await searchTagWithCache(tagId, { useCache });
     return Response.json(result);
   }
 

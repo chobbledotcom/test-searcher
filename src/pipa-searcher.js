@@ -225,18 +225,6 @@ export const writeCache = async (tagId, data, cacheDir = "cache/pipa") => {
 };
 
 /**
- * Check if cached data needs details fetched
- * @param {object} cached - Cached tag data
- * @param {boolean} includeReportDetails - Whether details are requested
- * @returns {boolean} True if details need to be fetched
- */
-const needsDetailsFetch = (cached, includeReportDetails) => {
-  if (!includeReportDetails) return false;
-  if (!cached.annualReports?.length) return false;
-  return !cached.annualReports[0]?.details;
-};
-
-/**
  * Handle cache hit - return cached data or fetch missing details
  * @param {object} cached - Cached tag data
  * @param {string} tagId - The tag ID
@@ -244,9 +232,11 @@ const needsDetailsFetch = (cached, includeReportDetails) => {
  * @returns {Promise<object>} Tag data with fromCache flag
  */
 const handleCacheHit = async (cached, tagId, options) => {
-  const { includeReportDetails = false, cacheDir = "cache/pipa" } = options;
+  const { cacheDir = "cache/pipa" } = options;
 
-  if (needsDetailsFetch(cached, includeReportDetails)) {
+  // Fetch details if not already in cache
+  const hasDetails = cached.annualReports?.[0]?.details;
+  if (cached.annualReports?.length && !hasDetails) {
     const withDetails = await fetchAllReportDetails(cached, options);
     await writeCache(tagId, withDetails, cacheDir);
     return { ...withDetails, fromCache: false };
@@ -255,20 +245,19 @@ const handleCacheHit = async (cached, tagId, options) => {
 };
 
 /**
- * Fetch fresh tag data and optionally include report details
+ * Fetch fresh tag data with report details
  * @param {string} tagId - The tag ID
  * @param {object} options - Options
  * @returns {Promise<object>} Tag data
  */
 const fetchFreshData = async (tagId, options) => {
-  const { includeReportDetails = false, cacheDir = "cache/pipa" } = options;
+  const { cacheDir = "cache/pipa" } = options;
 
   const data = await searchTag(tagId, options);
 
-  const finalData =
-    data.found && includeReportDetails
-      ? await fetchAllReportDetails(data, options)
-      : data;
+  const finalData = data.found
+    ? await fetchAllReportDetails(data, options)
+    : data;
 
   if (finalData.found) {
     await writeCache(tagId, finalData, cacheDir);
@@ -282,9 +271,8 @@ const fetchFreshData = async (tagId, options) => {
  * @param {string} tagId - The tag ID to search for
  * @param {object} options - Options
  * @param {boolean} options.useCache - Whether to use cached data (default: true)
- * @param {boolean} options.includeReportDetails - Whether to fetch detailed reports
  * @param {string} options.cacheDir - Cache directory (default: "cache/pipa")
- * @returns {Promise<object>} The tag data
+ * @returns {Promise<object>} The tag data with detailed reports
  */
 export const searchTagWithCache = async (tagId, options = {}) => {
   const { useCache = true, cacheDir = "cache/pipa" } = options;
@@ -337,26 +325,6 @@ export const fetchAllReportDetails = async (tagData, options = {}) => {
   );
 
   return { ...tagData, annualReports: detailedReports };
-};
-
-/**
- * Search for a tag and optionally fetch detailed report data
- * @param {string} tagId - The tag ID to search for
- * @param {object} options - Options
- * @param {boolean} options.includeReportDetails - Whether to fetch detailed reports
- * @param {Function} options.fetcher - Custom fetch function (for testing)
- * @returns {Promise<object>} Tag data with optional detailed reports
- */
-export const searchTagWithReports = async (tagId, options = {}) => {
-  const { includeReportDetails = false, ...searchOptions } = options;
-
-  const tagData = await searchTag(tagId, searchOptions);
-
-  if (!tagData.found || !includeReportDetails) {
-    return tagData;
-  }
-
-  return fetchAllReportDetails(tagData, searchOptions);
 };
 
 // Re-export fetchReport for convenience

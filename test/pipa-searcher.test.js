@@ -10,7 +10,6 @@ import {
   readCache,
   searchTag,
   searchTagWithCache,
-  searchTagWithReports,
   writeCache,
 } from "#src/pipa-searcher.js";
 
@@ -290,7 +289,6 @@ describe("searchTagWithCache", () => {
 
     const result = await searchTagWithCache("12345", {
       cacheDir: testCacheDir,
-      includeReportDetails: true,
       fetcher: mockFetch,
     });
 
@@ -315,7 +313,6 @@ describe("searchTagWithCache", () => {
 
     const result = await searchTagWithCache("12345", {
       cacheDir: testCacheDir,
-      includeReportDetails: true,
     });
 
     expect(result.fromCache).toBe(true);
@@ -333,7 +330,6 @@ describe("searchTagWithCache", () => {
 
     const result = await searchTagWithCache("12345", {
       cacheDir: testCacheDir,
-      includeReportDetails: true,
     });
 
     expect(result.fromCache).toBe(true);
@@ -389,7 +385,6 @@ describe("searchTagWithCache", () => {
 
     const result = await searchTagWithCache("12345", {
       cacheDir: testCacheDir,
-      includeReportDetails: true,
       fetcher: mockFetch,
     });
 
@@ -418,7 +413,7 @@ describe("searchTagWithCache", () => {
     expect(cached).toBeNull();
   });
 
-  test("fetches and caches fresh data without details", async () => {
+  test("fetches and caches fresh data for tag without reports", async () => {
     const sampleTagHtml = `
       <div class="check__image-tag check__image-tag--green">Pass</div>
       <div class="check__details">
@@ -446,12 +441,12 @@ describe("searchTagWithCache", () => {
 
     const result = await searchTagWithCache("12345", {
       cacheDir: testCacheDir,
-      includeReportDetails: false,
       fetcher: mockFetch,
     });
 
     expect(result.found).toBe(true);
     expect(result.unitReferenceNo).toBe("12345");
+    expect(result.annualReports).toHaveLength(0);
 
     // Verify it was cached
     const cached = await readCache("12345", testCacheDir);
@@ -568,32 +563,6 @@ describe("fetchAllReportDetails", () => {
     expect(result.annualReports).toHaveLength(2);
     expect(result.annualReports[0].details).toBeDefined();
     expect(result.annualReports[1].details).toBeDefined();
-  });
-});
-
-describe("searchTagWithReports", () => {
-  test("returns tag data without details when includeReportDetails is false", async () => {
-    const result = await searchTagWithReports("abc", {
-      includeReportDetails: false,
-    });
-
-    expect(result.found).toBe(false);
-    expect(result.error).toContain("Invalid tag ID");
-  });
-
-  test("returns tag data when tag not found", async () => {
-    const mockFetch = () =>
-      Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({ success: "false" }),
-      });
-
-    const result = await searchTagWithReports("12345", {
-      fetcher: mockFetch,
-      includeReportDetails: true,
-    });
-
-    expect(result.found).toBe(false);
   });
 });
 
