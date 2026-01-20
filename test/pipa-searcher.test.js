@@ -42,6 +42,7 @@ describe("isAllNumbers", () => {
 });
 
 describe("parseTagPage", () => {
+  // Updated to match new PIPA site structure (2025)
   const samplePassHtml = `
     <div class="check__image check__image--green">
         <div class="check__image-tag check__image-tag--green">Pass</div>
@@ -63,18 +64,26 @@ describe("parseTagPage", () => {
     <div class="y-spacer"></div>
     <a class="button" href="https://hub.pipa.org.uk/download/reports/certificate/abc123">View Certificate</a>
     <a class="button" href="https://hub.pipa.org.uk/public/reports/report/abc123">View Report</a>
-    <a class="report report--green" href="https://hub.pipa.org.uk/public/reports/report/abc123">
-      <div class="report__date">
-        <div class="report__label">Date:</div>
-        <div class="report__value">04 November 2025</div>
+    <a class="report report--green" href="https://hub.pipa.org.uk/public/reports/report/abc123" target="_blank">
+      <div class="report__highlight"></div>
+      <div class="report__left">
+        <div class="report__date">
+          <div class="report__label">Date:</div>
+          <div class="report__value">04 November 2025</div>
+        </div>
+        <div class="report__number">
+          <div class="report__label">Report No:</div>
+          <div class="report__value">424365</div>
+        </div>
       </div>
-      <div>
-        <div class="report__label">Inspector:</div>
-        <div class="report__value">Test Inspector</div>
+      <div class="report__center">
+        <div class="report__company">
+          <div class="report__label">Inspection Body:</div>
+          <div class="report__value">Test Inspector Ltd</div>
+        </div>
       </div>
-      <div>
-        <div class="report__label">Status:</div>
-        <div class="report__value">Pass</div>
+      <div class="report__right">
+        <div class="tag tag--small">Pass</div>
       </div>
     </a>
   `;
@@ -101,7 +110,8 @@ describe("parseTagPage", () => {
 
     expect(result.annualReports).toHaveLength(1);
     expect(result.annualReports[0].date).toBe("04 November 2025");
-    expect(result.annualReports[0].inspector).toBe("Test Inspector");
+    expect(result.annualReports[0].reportNo).toBe("424365");
+    expect(result.annualReports[0].inspectionBody).toBe("Test Inspector Ltd");
     expect(result.annualReports[0].status).toBe("Pass");
     expect(result.annualReports[0].statusClass).toBe("green");
   });

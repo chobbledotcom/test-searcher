@@ -53,6 +53,9 @@ const getHomepageHtml = () => `<!DOCTYPE html>
         <label for="unitId">Unit ID</label>
         <input type="text" id="unitId" name="unitId" placeholder="e.g. 40000" required pattern="[0-9]+" title="Unit ID must be a number">
       </div>
+      <div class="form-group">
+        <label><input type="checkbox" id="useCache" name="useCache" checked> Use cache</label>
+      </div>
       <button type="submit" id="searchBtn">Search</button>
     </form>
   </div>
@@ -100,7 +103,7 @@ const getHomepageHtml = () => `<!DOCTYPE html>
     const form = document.getElementById('searchForm');
     const hostSelect = document.getElementById('host');
     const unitIdInput = document.getElementById('unitId');
-    const searchBtn = document.getElementById('searchBtn');
+    const useCacheCheckbox = document.getElementById('useCache');
 
     form.addEventListener('submit', (e) => {
       e.preventDefault();
@@ -113,7 +116,12 @@ const getHomepageHtml = () => `<!DOCTYPE html>
         alert('Please enter a valid numeric Unit ID');
         return;
       }
-      window.location.href = '/tag/' + encodeURIComponent(unitId);
+      const useCache = useCacheCheckbox.checked;
+      let url = '/tag/' + encodeURIComponent(unitId);
+      if (!useCache) {
+        url += '?noCache=1';
+      }
+      window.location.href = url;
     });
   </script>
 </body>
@@ -135,9 +143,11 @@ const handleRequest = async (req) => {
   }
 
   // GET /tag/:id - Search for a PIPA tag
+  // ?noCache=1 bypasses cache read (but still writes to cache)
   if (url.pathname.startsWith("/tag/")) {
     const tagId = url.pathname.slice(5);
-    const result = await searchTagWithCache(tagId);
+    const useCache = !url.searchParams.has("noCache");
+    const result = await searchTagWithCache(tagId, { useCache });
     return Response.json(result);
   }
 

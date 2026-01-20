@@ -23,7 +23,8 @@ interface AnnualReport {
   statusClass: string;
   url: string;
   date: string;
-  inspector: string;
+  reportNo: string;
+  inspectionBody: string;
   status: string;
 }
 
@@ -143,8 +144,13 @@ const extractDetails = (html: string): TagDetails => {
 };
 
 const extractAnnualReports = (html: string): AnnualReport[] => {
+  // Updated regex to match new PIPA site structure (2025):
+  // - Date in report__date
+  // - Report No in report__number
+  // - Inspection Body in report__company
+  // - Status in tag tag--small
   const reportRegex =
-    /<a class="report report--(\w+)" href="([^"]+)"[^>]*>[\s\S]*?Date:<\/div>\s*<div[^>]*>([^<]+)[\s\S]*?Inspector:<\/div>\s*<div[^>]*>([^<]+)[\s\S]*?Status:<\/div>\s*<div[^>]*>([^<]+)/g;
+    /<a class="report report--(\w+)" href="([^"]+)"[^>]*>[\s\S]*?report__date[\s\S]*?report__value">([^<]+)[\s\S]*?report__number[\s\S]*?report__value">([^<]+)[\s\S]*?report__company[\s\S]*?report__value">([^<]+)[\s\S]*?tag tag--small">([^<]+)/g;
 
   const matches = html.matchAll(reportRegex);
   const reports: AnnualReport[] = [];
@@ -154,8 +160,9 @@ const extractAnnualReports = (html: string): AnnualReport[] => {
       statusClass: match[1],
       url: match[2],
       date: match[3].trim(),
-      inspector: match[4].trim(),
-      status: match[5].trim(),
+      reportNo: match[4].trim(),
+      inspectionBody: match[5].trim(),
+      status: match[6].trim(),
     });
   }
 
@@ -231,12 +238,16 @@ const searchTag = async (tagId: string): Promise<TagResult> => {
   return parseTagPage(html, tagId);
 };
 
-const searchTagWithCache = async (tagId: string): Promise<TagResult> => {
-  const cached = await readCache(tagId);
-  if (cached) return cached;
+const searchTagWithCache = async (tagId: string, useCache = true): Promise<TagResult> => {
+  // Only read from cache if useCache is true
+  if (useCache) {
+    const cached = await readCache(tagId);
+    if (cached) return cached;
+  }
 
   const data = await searchTag(tagId);
 
+  // Always write to cache if found (even when bypassing read)
   if (data.found) {
     await writeCache(tagId, data);
   }
@@ -292,6 +303,9 @@ const getHomepageHtml = (): string => `<!DOCTYPE html>
         <label for="unitId">Unit ID</label>
         <input type="text" id="unitId" name="unitId" placeholder="e.g. 40000" required pattern="[0-9]+" title="Unit ID must be a number">
       </div>
+      <div class="form-group">
+        <label><input type="checkbox" id="useCache" name="useCache" checked> Use cache</label>
+      </div>
       <button type="submit" id="searchBtn">Search</button>
     </form>
   </div>
@@ -339,6 +353,7 @@ const getHomepageHtml = (): string => `<!DOCTYPE html>
     const form = document.getElementById('searchForm');
     const hostSelect = document.getElementById('host');
     const unitIdInput = document.getElementById('unitId');
+    const useCacheCheckbox = document.getElementById('useCache');
 
     form.addEventListener('submit', (e) => {
       e.preventDefault();
@@ -351,7 +366,12 @@ const getHomepageHtml = (): string => `<!DOCTYPE html>
         alert('Please enter a valid numeric Unit ID');
         return;
       }
-      window.location.href = '/tag/' + encodeURIComponent(unitId);
+      const useCache = useCacheCheckbox.checked;
+      let url = '/tag/' + encodeURIComponent(unitId);
+      if (!useCache) {
+        url += '?noCache=1';
+      }
+      window.location.href = url;
     });
   </script>
 </body>
@@ -377,7 +397,8 @@ BunnySDK.net.http.serve(async (request: Request): Promise<Response> => {
 
   if (url.pathname.startsWith("/tag/")) {
     const tagId = url.pathname.slice(5);
-    const result = await searchTagWithCache(tagId);
+    const useCache = !url.searchParams.has("noCache");
+    const result = await searchTagWithCache(tagId, useCache);
     return jsonResponse(result);
   }
 

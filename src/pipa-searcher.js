@@ -77,8 +77,13 @@ const extractDetails = (html) => {
  * @returns {Array} Array of report objects
  */
 const extractAnnualReports = (html) => {
+  // Updated regex to match new PIPA site structure:
+  // - Date in report__date
+  // - Report No in report__number
+  // - Inspection Body in report__company
+  // - Status in tag tag--small
   const reportRegex =
-    /<a class="report report--(\w+)" href="([^"]+)"[^>]*>[\s\S]*?Date:<\/div>\s*<div[^>]*>([^<]+)[\s\S]*?Inspector:<\/div>\s*<div[^>]*>([^<]+)[\s\S]*?Status:<\/div>\s*<div[^>]*>([^<]+)/g;
+    /<a class="report report--(\w+)" href="([^"]+)"[^>]*>[\s\S]*?report__date[\s\S]*?report__value">([^<]+)[\s\S]*?report__number[\s\S]*?report__value">([^<]+)[\s\S]*?report__company[\s\S]*?report__value">([^<]+)[\s\S]*?tag tag--small">([^<]+)/g;
 
   const matches = html.matchAll(reportRegex);
   const reports = [];
@@ -88,8 +93,9 @@ const extractAnnualReports = (html) => {
       statusClass: match[1],
       url: match[2],
       date: match[3].trim(),
-      inspector: match[4].trim(),
-      status: match[5].trim(),
+      reportNo: match[4].trim(),
+      inspectionBody: match[5].trim(),
+      status: match[6].trim(),
     });
   }
 
