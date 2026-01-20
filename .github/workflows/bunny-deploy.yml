@@ -22,4 +22,4 @@ jobs:
         with:
           script_id: ${{ secrets.BUNNY_SCRIPT_ID }}
           file: "bunny-script.ts"
-          api_key: ${{ secrets.BUNNY_SCRIPT_DEPLOYMENT_KEY }}
+          api_key: ${{ secrets.BUNNY_ACCESS_KEY }}
