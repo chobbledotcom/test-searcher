@@ -5,6 +5,7 @@
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { fetchReport } from "#src/report-parser.js";
 
 const BASE_URL = "https://www.pipa.org.uk";
 const SEARCH_API = "/umbraco/Surface/searchSurface/SearchTag";
@@ -76,8 +77,13 @@ const extractDetails = (html) => {
  * @returns {Array} Array of report objects
  */
 const extractAnnualReports = (html) => {
+  // Updated regex to match new PIPA site structure:
+  // - Date in report__date
+  // - Report No in report__number
+  // - Inspection Body in report__company
+  // - Status in tag tag--small
   const reportRegex =
-    /<a class="report report--(\w+)" href="([^"]+)"[^>]*>[\s\S]*?Date:<\/div>\s*<div[^>]*>([^<]+)[\s\S]*?Inspector:<\/div>\s*<div[^>]*>([^<]+)[\s\S]*?Status:<\/div>\s*<div[^>]*>([^<]+)/g;
+    /<a class="report report--(\w+)" href="([^"]+)"[^>]*>[\s\S]*?report__date[\s\S]*?report__value">([^<]+)[\s\S]*?report__number[\s\S]*?report__value">([^<]+)[\s\S]*?report__company[\s\S]*?report__value">([^<]+)[\s\S]*?tag tag--small">([^<]+)/g;
 
   const matches = html.matchAll(reportRegex);
   const reports = [];
@@ -87,8 +93,9 @@ const extractAnnualReports = (html) => {
       statusClass: match[1],
       url: match[2],
       date: match[3].trim(),
-      inspector: match[4].trim(),
-      status: match[5].trim(),
+      reportNo: match[4].trim(),
+      inspectionBody: match[5].trim(),
+      status: match[6].trim(),
     });
   }
 
@@ -246,3 +253,66 @@ export const searchTagWithCache = async (tagId, options = {}) => {
 
   return data;
 };
+
+/**
+ * Fetch detailed report data for a single annual report
+ * @param {object} report - Report object with url property
+ * @param {object} options - Options
+ * @param {Function} options.fetcher - Custom fetch function (for testing)
+ * @returns {Promise<object>} Report with details added
+ */
+export const fetchReportDetails = async (report, options = {}) => {
+  if (!report?.url) {
+    return { ...report, details: null, detailsError: "No report URL" };
+  }
+
+  const details = await fetchReport(report.url, options);
+
+  if (!details.found) {
+    return { ...report, details: null, detailsError: details.error };
+  }
+
+  return { ...report, details };
+};
+
+/**
+ * Fetch detailed reports for all annual reports of a tag
+ * @param {object} tagData - Tag data with annualReports array
+ * @param {object} options - Options
+ * @param {Function} options.fetcher - Custom fetch function (for testing)
+ * @returns {Promise<object>} Tag data with detailed reports
+ */
+export const fetchAllReportDetails = async (tagData, options = {}) => {
+  if (!tagData?.found || !tagData?.annualReports?.length) {
+    return tagData;
+  }
+
+  const detailedReports = await Promise.all(
+    tagData.annualReports.map((report) => fetchReportDetails(report, options)),
+  );
+
+  return { ...tagData, annualReports: detailedReports };
+};
+
+/**
+ * Search for a tag and optionally fetch detailed report data
+ * @param {string} tagId - The tag ID to search for
+ * @param {object} options - Options
+ * @param {boolean} options.includeReportDetails - Whether to fetch detailed reports
+ * @param {Function} options.fetcher - Custom fetch function (for testing)
+ * @returns {Promise<object>} Tag data with optional detailed reports
+ */
+export const searchTagWithReports = async (tagId, options = {}) => {
+  const { includeReportDetails = false, ...searchOptions } = options;
+
+  const tagData = await searchTag(tagId, searchOptions);
+
+  if (!tagData.found || !includeReportDetails) {
+    return tagData;
+  }
+
+  return fetchAllReportDetails(tagData, searchOptions);
+};
+
+// Re-export fetchReport for convenience
+export { fetchReport };

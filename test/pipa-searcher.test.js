@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import {
+  fetchAllReportDetails,
+  fetchReport,
+  fetchReportDetails,
   getCachePath,
   isAllNumbers,
   parseTagPage,
   readCache,
   searchTag,
   searchTagWithCache,
+  searchTagWithReports,
   writeCache,
 } from "#src/pipa-searcher.js";
 
@@ -38,6 +42,7 @@ describe("isAllNumbers", () => {
 });
 
 describe("parseTagPage", () => {
+  // Updated to match new PIPA site structure (2025)
   const samplePassHtml = `
     <div class="check__image check__image--green">
         <div class="check__image-tag check__image-tag--green">Pass</div>
@@ -59,18 +64,26 @@ describe("parseTagPage", () => {
     <div class="y-spacer"></div>
     <a class="button" href="https://hub.pipa.org.uk/download/reports/certificate/abc123">View Certificate</a>
     <a class="button" href="https://hub.pipa.org.uk/public/reports/report/abc123">View Report</a>
-    <a class="report report--green" href="https://hub.pipa.org.uk/public/reports/report/abc123">
-      <div class="report__date">
-        <div class="report__label">Date:</div>
-        <div class="report__value">04 November 2025</div>
+    <a class="report report--green" href="https://hub.pipa.org.uk/public/reports/report/abc123" target="_blank">
+      <div class="report__highlight"></div>
+      <div class="report__left">
+        <div class="report__date">
+          <div class="report__label">Date:</div>
+          <div class="report__value">04 November 2025</div>
+        </div>
+        <div class="report__number">
+          <div class="report__label">Report No:</div>
+          <div class="report__value">424365</div>
+        </div>
       </div>
-      <div>
-        <div class="report__label">Inspector:</div>
-        <div class="report__value">Test Inspector</div>
+      <div class="report__center">
+        <div class="report__company">
+          <div class="report__label">Inspection Body:</div>
+          <div class="report__value">Test Inspector Ltd</div>
+        </div>
       </div>
-      <div>
-        <div class="report__label">Status:</div>
-        <div class="report__value">Pass</div>
+      <div class="report__right">
+        <div class="tag tag--small">Pass</div>
       </div>
     </a>
   `;
@@ -97,7 +110,8 @@ describe("parseTagPage", () => {
 
     expect(result.annualReports).toHaveLength(1);
     expect(result.annualReports[0].date).toBe("04 November 2025");
-    expect(result.annualReports[0].inspector).toBe("Test Inspector");
+    expect(result.annualReports[0].reportNo).toBe("424365");
+    expect(result.annualReports[0].inspectionBody).toBe("Test Inspector Ltd");
     expect(result.annualReports[0].status).toBe("Pass");
     expect(result.annualReports[0].statusClass).toBe("green");
   });
@@ -248,5 +262,148 @@ describe("searchTagWithCache", () => {
 
     expect(result.fromCache).toBeUndefined();
     expect(result.found).toBe(false);
+  });
+});
+
+describe("fetchReportDetails", () => {
+  const sampleReportHtml = `
+    <h1>Inspection Report 123-v1</h1>
+    <div class="badge badge--green">Pass</div>
+    <div class="label">Tag No:</div>
+    <div class="detail">40000</div>
+  `;
+
+  test("returns error when report has no URL", async () => {
+    const result = await fetchReportDetails({ date: "2025-01-01" });
+
+    expect(result.details).toBeNull();
+    expect(result.detailsError).toBe("No report URL");
+  });
+
+  test("returns error when report is null", async () => {
+    const result = await fetchReportDetails(null);
+
+    expect(result.details).toBeNull();
+    expect(result.detailsError).toBe("No report URL");
+  });
+
+  test("fetches and parses report details", async () => {
+    const mockFetch = () =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Map([["content-type", "text/html"]]),
+        text: () => Promise.resolve(sampleReportHtml),
+      });
+
+    const report = {
+      url: "https://hub.pipa.org.uk/public/reports/report/abc",
+      date: "04 Nov 2025",
+    };
+    const result = await fetchReportDetails(report, { fetcher: mockFetch });
+
+    expect(result.date).toBe("04 Nov 2025");
+    expect(result.details).toBeDefined();
+    expect(result.details.found).toBe(true);
+  });
+
+  test("returns error when fetch fails", async () => {
+    const mockFetch = () =>
+      Promise.resolve({
+        ok: false,
+        status: 404,
+      });
+
+    const report = {
+      url: "https://hub.pipa.org.uk/public/reports/report/abc",
+    };
+    const result = await fetchReportDetails(report, { fetcher: mockFetch });
+
+    expect(result.details).toBeNull();
+    expect(result.detailsError).toBe("Report fetch error: 404");
+  });
+});
+
+describe("fetchAllReportDetails", () => {
+  const sampleReportHtml = `
+    <h1>Inspection Report 123-v1</h1>
+    <div class="badge badge--green">Pass</div>
+  `;
+
+  test("returns unchanged data when not found", async () => {
+    const tagData = { found: false, error: "Not found" };
+    const result = await fetchAllReportDetails(tagData);
+
+    expect(result).toEqual(tagData);
+  });
+
+  test("returns unchanged data when no annual reports", async () => {
+    const tagData = { found: true, tagId: "40000", annualReports: [] };
+    const result = await fetchAllReportDetails(tagData);
+
+    expect(result).toEqual(tagData);
+  });
+
+  test("returns unchanged data when null", async () => {
+    const result = await fetchAllReportDetails(null);
+
+    expect(result).toBeNull();
+  });
+
+  test("fetches details for all annual reports", async () => {
+    const mockFetch = () =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Map([["content-type", "text/html"]]),
+        text: () => Promise.resolve(sampleReportHtml),
+      });
+
+    const tagData = {
+      found: true,
+      tagId: "40000",
+      annualReports: [
+        { url: "https://hub.pipa.org.uk/public/reports/report/abc" },
+        { url: "https://hub.pipa.org.uk/public/reports/report/def" },
+      ],
+    };
+
+    const result = await fetchAllReportDetails(tagData, { fetcher: mockFetch });
+
+    expect(result.annualReports).toHaveLength(2);
+    expect(result.annualReports[0].details).toBeDefined();
+    expect(result.annualReports[1].details).toBeDefined();
+  });
+});
+
+describe("searchTagWithReports", () => {
+  test("returns tag data without details when includeReportDetails is false", async () => {
+    const result = await searchTagWithReports("abc", {
+      includeReportDetails: false,
+    });
+
+    expect(result.found).toBe(false);
+    expect(result.error).toContain("Invalid tag ID");
+  });
+
+  test("returns tag data when tag not found", async () => {
+    const mockFetch = () =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ success: "false" }),
+      });
+
+    const result = await searchTagWithReports("12345", {
+      fetcher: mockFetch,
+      includeReportDetails: true,
+    });
+
+    expect(result.found).toBe(false);
+  });
+});
+
+describe("fetchReport re-export", () => {
+  test("fetchReport is exported from pipa-searcher", () => {
+    expect(typeof fetchReport).toBe("function");
   });
 });
