@@ -1,19 +1,23 @@
 /**
- * PIPA Report Parser
- * Parses detailed inspection report pages from hub.pipa.org.uk
+ * Report parsing functions
+ * Parses detailed PIPA inspection report pages from hub.pipa.org.uk
  */
 
-import { parse } from "node-html-parser";
-
-const USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+import { type HTMLElement, parse } from "node-html-parser";
+import { USER_AGENT } from "./constants.ts";
+import type {
+  AnnualReport,
+  BadgeStatus,
+  FetchOptions,
+  InspectionField,
+  ReportDetails,
+  TagResult,
+} from "./types.ts";
 
 /**
  * Get detail value from a row containing a label
- * @param {HTMLElement} label - Label element
- * @returns {string|null} Detail value or null
  */
-const getDetailFromLabelRow = (label) => {
+const getDetailFromLabelRow = (label: HTMLElement): string | null => {
   const row = label.closest("tr");
   if (!row) return null;
   const detail = row.querySelector(".detail");
@@ -22,11 +26,11 @@ const getDetailFromLabelRow = (label) => {
 
 /**
  * Find a row by label text and extract the detail value
- * @param {HTMLElement} root - Parsed HTML root
- * @param {string} labelText - Label text to search for
- * @returns {string|null} Detail value or null
  */
-const findDetailByLabel = (root, labelText) => {
+const findDetailByLabel = (
+  root: HTMLElement,
+  labelText: string,
+): string | null => {
   const labels = root.querySelectorAll(".label");
   for (const label of labels) {
     if (label.text.trim().startsWith(labelText)) {
@@ -38,28 +42,40 @@ const findDetailByLabel = (root, labelText) => {
 };
 
 /**
- * Extract badge info from a row
- * @param {HTMLElement} row - Table row element
- * @returns {object|null} Badge info or null
+ * Extract multiple fields by label into a record
  */
-const extractBadgeFromRow = (row) => {
+const extractFieldsByLabels = (
+  root: HTMLElement,
+  fields: [string, string][],
+): Record<string, string> => {
+  const result: Record<string, string> = {};
+  for (const [key, label] of fields) {
+    const value = findDetailByLabel(root, label);
+    if (value) result[key] = value;
+  }
+  return result;
+};
+
+/**
+ * Extract badge info from a row
+ */
+const extractBadgeFromRow = (row: HTMLElement): BadgeStatus | null => {
   const badge = row.querySelector("[class*='badge badge--']");
   if (!badge) return null;
-  const classAttr = badge.getAttribute("class") || "";
+  const classAttr = badge.getAttribute("class") ?? "";
   const classMatch = classAttr.match(/badge--(\w+)/);
-  if (!classMatch) return null;
+  const statusClass = classMatch?.[1];
+  if (!statusClass) return null;
   return {
-    statusClass: classMatch[1],
+    statusClass,
     status: badge.text.trim(),
   };
 };
 
 /**
  * Get badge from a label's row
- * @param {HTMLElement} label - Label element
- * @returns {object|null} Badge info or null
  */
-const getBadgeFromLabelRow = (label) => {
+const getBadgeFromLabelRow = (label: HTMLElement): BadgeStatus | null => {
   const row = label.closest("tr");
   if (!row) return null;
   return extractBadgeFromRow(row);
@@ -67,11 +83,11 @@ const getBadgeFromLabelRow = (label) => {
 
 /**
  * Find a badge by label text and extract status info
- * @param {HTMLElement} root - Parsed HTML root
- * @param {string} labelText - Label text to search for
- * @returns {object|null} Status info or null
  */
-const findBadgeByLabel = (root, labelText) => {
+const findBadgeByLabel = (
+  root: HTMLElement,
+  labelText: string,
+): BadgeStatus | null => {
   const labels = root.querySelectorAll(".label");
   for (const label of labels) {
     if (!label.text.trim().includes(labelText)) continue;
@@ -83,26 +99,24 @@ const findBadgeByLabel = (root, labelText) => {
 
 /**
  * Extract report ID from header
- * @param {HTMLElement} root - Parsed HTML root
- * @returns {string|null} Report ID or null
  */
-const extractReportId = (root) => {
+const extractReportId = (root: HTMLElement): string | null => {
   const h1 = root.querySelector("h1");
   if (!h1) return null;
   const headerText = h1.text.trim();
   const match = headerText.match(/Inspection Report\s+(\S+)/);
-  return match?.[1] || null;
+  return match?.[1] ?? null;
 };
 
 /**
  * Extract status badge info from HTML
- * @param {HTMLElement} root - Parsed HTML root
- * @returns {object} Status info
  */
-const extractStatusBadge = (root) => {
+const extractStatusBadge = (
+  root: HTMLElement,
+): { statusClass?: string; status?: string } => {
   const statusBadge = root.querySelector("[class*='badge badge--']");
   if (!statusBadge) return {};
-  const classAttr = statusBadge.getAttribute("class") || "";
+  const classAttr = statusBadge.getAttribute("class") ?? "";
   const classMatch = classAttr.match(/badge--(\w+)/);
   if (!classMatch) return {};
   return {
@@ -113,10 +127,8 @@ const extractStatusBadge = (root) => {
 
 /**
  * Extract image URL from HTML
- * @param {HTMLElement} root - Parsed HTML root
- * @returns {string|null} Image URL or null
  */
-const extractImageUrl = (root) => {
+const extractImageUrl = (root: HTMLElement): string | null => {
   const img = root.querySelector('img[src*="hub.pipa.org.uk/content-files"]');
   if (!img) return null;
   const src = img.getAttribute("src");
@@ -125,19 +137,15 @@ const extractImageUrl = (root) => {
 
 /**
  * Extract intro section fields from report HTML
- * @param {string} html - Full HTML content
- * @returns {object} Intro fields
  */
-export const extractIntroFields = (html) => {
+export const extractIntroFields = (html: string): Record<string, unknown> => {
   const root = parse(html);
-  const intro = {};
+  const intro: Record<string, unknown> = {};
 
-  // Extract report ID from header
   const reportId = extractReportId(root);
   if (reportId) intro.reportId = reportId;
 
-  // Extract fields using label search
-  const introFields = [
+  const introFields: [string, string][] = [
     ["id", "ID:"],
     ["validFrom", "Inspection Valid from:"],
     ["expiryDate", "Expiry Date:"],
@@ -152,10 +160,8 @@ export const extractIntroFields = (html) => {
     if (value) intro[key] = value;
   }
 
-  // Extract status with badge class
   Object.assign(intro, extractStatusBadge(root));
 
-  // Extract main image URL
   const imageUrl = extractImageUrl(root);
   if (imageUrl) intro.imageUrl = imageUrl;
 
@@ -164,11 +170,11 @@ export const extractIntroFields = (html) => {
 
 /**
  * Find a section table by header text
- * @param {HTMLElement} root - Parsed HTML root
- * @param {string} headerText - Section header text
- * @returns {HTMLElement|null} tbody element or null
  */
-const findSectionTable = (root, headerText) => {
+const findSectionTable = (
+  root: HTMLElement,
+  headerText: string,
+): HTMLElement | null => {
   const headers = root.querySelectorAll("th[colspan]");
   for (const th of headers) {
     if (th.text.trim() === headerText) {
@@ -181,45 +187,33 @@ const findSectionTable = (root, headerText) => {
   return null;
 };
 
+const REPORT_DETAIL_FIELDS: [string, string][] = [
+  ["creationDate", "Creation Date:"],
+  ["inspectionDate", "Inspection Date:"],
+  ["placeOfInspection", "Place of Inspection:"],
+  ["inspector", "Inspector:"],
+  ["structureVersion", "Structure version:"],
+  ["indoorUseOnly", "Tested for Indoor Use Only:"],
+];
+
 /**
  * Extract report details section
- * @param {string} html - Full HTML content
- * @returns {object} Report details
  */
-export const extractReportDetails = (html) => {
+export const extractReportDetails = (html: string): Record<string, string> => {
   const root = parse(html);
-  const details = {};
-
-  const fields = [
-    ["creationDate", "Creation Date:"],
-    ["inspectionDate", "Inspection Date:"],
-    ["placeOfInspection", "Place of Inspection:"],
-    ["inspector", "Inspector:"],
-    ["structureVersion", "Structure version:"],
-    ["indoorUseOnly", "Tested for Indoor Use Only:"],
-  ];
-
-  for (const [key, label] of fields) {
-    const value = findDetailByLabel(root, label);
-    if (value) details[key] = value;
-  }
-
-  return details;
+  return extractFieldsByLabels(root, REPORT_DETAIL_FIELDS);
 };
 
 /**
  * Extract device information section
- * @param {string} html - Full HTML content
- * @returns {object} Device info
  */
-export const extractDeviceInfo = (html) => {
+export const extractDeviceInfo = (html: string): Record<string, unknown> => {
   const root = parse(html);
-  const device = {};
+  const device: Record<string, unknown> = {};
 
-  // Find the Device section
   const deviceSection = findSectionTable(root, "Device");
 
-  const fields = [
+  const fields: [string, string][] = [
     ["pipaReferenceNumber", "PIPA Reference Number:"],
     ["tagNumber", "Tag Number:"],
     ["type", "Type:"],
@@ -229,15 +223,13 @@ export const extractDeviceInfo = (html) => {
     ["dateManufactured", "Date Manufactured:"],
   ];
 
-  // If we found the device section, search within it first
-  const searchRoot = deviceSection || root;
+  const searchRoot = deviceSection ?? root;
 
   for (const [key, label] of fields) {
     const value = findDetailByLabel(searchRoot, label);
     if (value) device[key] = value;
   }
 
-  // Manual present - Pass/Fail (search in device section)
   const manualStatus = findBadgeByLabel(root, "operation manual present");
   if (manualStatus) device.operationManualPresent = manualStatus;
 
@@ -246,10 +238,11 @@ export const extractDeviceInfo = (html) => {
 
 /**
  * Extract badge status from row element
- * @param {HTMLElement} row - Table row element
- * @param {object} field - Field object to populate
  */
-const extractBadgeStatus = (row, field) => {
+const extractBadgeStatus = (
+  row: HTMLElement,
+  field: Record<string, unknown>,
+): void => {
   const badgeInfo = extractBadgeFromRow(row);
   if (badgeInfo) {
     field.statusClass = badgeInfo.statusClass;
@@ -259,12 +252,13 @@ const extractBadgeStatus = (row, field) => {
 
 /**
  * Extract detail values from row element
- * @param {HTMLElement} row - Table row element
- * @param {object} field - Field object to populate
  */
-const extractDetailValues = (row, field) => {
+const extractDetailValues = (
+  row: HTMLElement,
+  field: Record<string, unknown>,
+): void => {
   const details = row.querySelectorAll(".detail");
-  const values = [];
+  const values: string[] = [];
   for (const detail of details) {
     const val = detail.text.trim();
     if (val) values.push(val);
@@ -276,10 +270,11 @@ const extractDetailValues = (row, field) => {
 
 /**
  * Extract notes from row element
- * @param {HTMLElement} row - Table row element
- * @param {object} field - Field object to populate
  */
-const extractRowNotes = (row, field) => {
+const extractRowNotes = (
+  row: HTMLElement,
+  field: Record<string, unknown>,
+): void => {
   const notesDiv = row.querySelector(".text");
   if (!notesDiv) return;
   const notes = notesDiv.text.trim();
@@ -290,43 +285,39 @@ const extractRowNotes = (row, field) => {
 
 /**
  * Parse a single inspection row
- * @param {HTMLElement} row - Table row element
- * @returns {object|null} Field data or null
  */
-const parseInspectionRow = (row) => {
+const parseInspectionRow = (row: HTMLElement): InspectionField | null => {
   const labelDiv = row.querySelector(".label");
   if (!labelDiv) return null;
 
-  const field = { label: labelDiv.text.trim().replace(/:$/, "") };
-  extractBadgeStatus(row, field);
-  extractDetailValues(row, field);
-  extractRowNotes(row, field);
+  const field: InspectionField = {
+    label: labelDiv.text.trim().replace(/:$/, ""),
+  };
+  const fieldRecord = field as unknown as Record<string, unknown>;
+  extractBadgeStatus(row, fieldRecord);
+  extractDetailValues(row, fieldRecord);
+  extractRowNotes(row, fieldRecord);
 
   return field;
 };
 
 /**
  * Convert section name to camelCase key
- * @param {string} name - Section name
- * @returns {string} camelCase key
  */
-const sectionNameToKey = (name) =>
+const sectionNameToKey = (name: string): string =>
   name
     .toLowerCase()
     .replace(/[,&]/g, "")
-    .replace(/\s+(\w)/g, (_, c) => c.toUpperCase());
+    .replace(/\s+(\w)/g, (_, c: string) => c.toUpperCase());
 
-/**
- * Sections to skip when extracting inspection data
- */
 const SKIP_SECTIONS = new Set(["Report Details", "Device"]);
 
 /**
  * Process a single section header and extract fields
- * @param {HTMLElement} th - Section header element
- * @returns {object|null} Section data or null
  */
-const processSection = (th) => {
+const processSection = (
+  th: HTMLElement,
+): { key: string; fields: InspectionField[] } | null => {
   const sectionName = th.text.trim();
   if (SKIP_SECTIONS.has(sectionName)) return null;
 
@@ -337,7 +328,7 @@ const processSection = (th) => {
   if (!tbody) return null;
 
   const rows = tbody.querySelectorAll("tr");
-  const fields = [];
+  const fields: InspectionField[] = [];
 
   for (const row of rows) {
     const field = parseInspectionRow(row);
@@ -351,12 +342,12 @@ const processSection = (th) => {
 
 /**
  * Extract all inspection sections (Structure, Materials, etc.)
- * @param {string} html - Full HTML content
- * @returns {object} Sections with their fields
  */
-export const extractInspectionSections = (html) => {
+export const extractInspectionSections = (
+  html: string,
+): Record<string, InspectionField[]> => {
   const root = parse(html);
-  const sections = {};
+  const sections: Record<string, InspectionField[]> = {};
 
   const headers = root.querySelectorAll("th[colspan]");
   for (const th of headers) {
@@ -369,14 +360,14 @@ export const extractInspectionSections = (html) => {
 
 /**
  * Extract user capacity limits
- * @param {string} html - Full HTML content
- * @returns {object} User limits by height
  */
-export const extractUserLimits = (html) => {
+export const extractUserLimits = (
+  html: string,
+): Record<string, number | string> => {
   const root = parse(html);
-  const limits = {};
+  const limits: Record<string, number | string> = {};
 
-  const heightPatterns = [
+  const heightPatterns: [string, string][] = [
     ["upTo1_0m", "Max Number of Users of Height up to 1.0m:"],
     ["upTo1_2m", "Max Number of Users of Height up to 1.2m:"],
     ["upTo1_5m", "Max Number of Users of Height up to 1.5m:"],
@@ -393,7 +384,6 @@ export const extractUserLimits = (html) => {
     }
   }
 
-  // Custom max height
   const customValue = findDetailByLabel(root, "Custom Max User Height:");
   if (customValue) {
     limits.customMaxHeight = customValue;
@@ -402,64 +392,50 @@ export const extractUserLimits = (html) => {
   return limits;
 };
 
+const NOTES_FIELDS: [string, string][] = [
+  ["additionalNotes", "Additional Notes:"],
+  ["riskAssessmentNotes", "Risk Assessment Notes:"],
+  ["repairsNeeded", "Repairs needed to pass inspection:"],
+  ["advisoryItems", "Advisory items"],
+];
+
+/**
+ * Process notes to convert HTML entities to newlines
+ */
+const processNoteValues = (
+  notes: Record<string, string>,
+): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(notes).map(([k, v]) => [k, v.replace(/&#xA;/g, "\n")]),
+  );
+
 /**
  * Extract notes section
- * @param {string} html - Full HTML content
- * @returns {object} Notes
  */
-export const extractNotes = (html) => {
+export const extractNotes = (html: string): Record<string, string> => {
   const root = parse(html);
-  const notes = {};
-
-  const fields = [
-    ["additionalNotes", "Additional Notes:"],
-    ["riskAssessmentNotes", "Risk Assessment Notes:"],
-    ["repairsNeeded", "Repairs needed to pass inspection:"],
-    ["advisoryItems", "Advisory items"],
-  ];
-
-  for (const [key, label] of fields) {
-    const value = findDetailByLabel(root, label);
-    if (value) {
-      // Convert HTML entities for newlines
-      const processed = value.replace(/&#xA;/g, "\n");
-      notes[key] = processed;
-    }
-  }
-
-  return notes;
+  const rawNotes = extractFieldsByLabels(root, NOTES_FIELDS);
+  return processNoteValues(rawNotes);
 };
+
+const DIMENSION_FIELDS: [string, string][] = [
+  ["length", "Length:"],
+  ["width", "Width:"],
+  ["height", "Height:"],
+];
 
 /**
  * Extract key dimensions from Structure section
- * @param {string} html - Full HTML content
- * @returns {object} Dimensions
  */
-export const extractDimensions = (html) => {
+export const extractDimensions = (html: string): Record<string, string> => {
   const root = parse(html);
-  const dimensions = {};
-
-  const fields = [
-    ["length", "Length:"],
-    ["width", "Width:"],
-    ["height", "Height:"],
-  ];
-
-  for (const [key, label] of fields) {
-    const value = findDetailByLabel(root, label);
-    if (value) dimensions[key] = value;
-  }
-
-  return dimensions;
+  return extractFieldsByLabels(root, DIMENSION_FIELDS);
 };
 
 /**
  * Parse a complete PIPA report page
- * @param {string} html - The full HTML of the report page
- * @returns {object} Parsed report data
  */
-export const parseReportPage = (html) => {
-  // Check if this looks like a valid report page
+export const parseReportPage = (html: string): ReportDetails => {
   if (!html.includes("Inspection Report") && !html.includes("badge badge--")) {
     return { found: false };
   }
@@ -482,27 +458,24 @@ export const parseReportPage = (html) => {
     notes,
     inspectionSections: sections,
     fetchedAt: new Date().toISOString(),
-  };
+  } as ReportDetails;
 };
 
 /**
  * Check if URL is a valid PIPA report URL
- * @param {string} url - URL to validate
- * @returns {boolean} True if valid
  */
-const isValidReportUrl = (url) => url?.includes("hub.pipa.org.uk");
+const isValidReportUrl = (url: string | null | undefined): boolean =>
+  url?.includes("hub.pipa.org.uk") ?? false;
 
 /**
- * Check response for redirect (PDF download)
- * @param {Response} response - Fetch response
- * @returns {object|null} Error result if redirect, null otherwise
+ * Check if response is a redirect (likely PDF download)
  */
-const checkForRedirect = (response) => {
+const checkForRedirect = (response: Response): ReportDetails | null => {
   if (response.status >= 300 && response.status < 400) {
     return {
       found: false,
       isPdf: true,
-      redirectUrl: response.headers.get("location"),
+      redirectUrl: response.headers.get("location") ?? undefined,
       error: "Report is a PDF download, not an HTML page",
     };
   }
@@ -510,29 +483,29 @@ const checkForRedirect = (response) => {
 };
 
 /**
- * Check if response is PDF content
- * @param {Response} response - Fetch response
- * @returns {boolean} True if PDF
+ * Check if response is PDF content type
  */
-const isPdfContent = (response) => {
-  const contentType = response.headers.get("content-type") || "";
-  return contentType.includes("application/pdf");
+const checkForPdfContent = (response: Response): ReportDetails | null => {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (contentType.includes("application/pdf")) {
+    return { found: false, isPdf: true, error: "Report is a PDF, not HTML" };
+  }
+  return null;
 };
 
 /**
  * Fetch and parse a PIPA report
- * @param {string} reportUrl - The report URL
- * @param {object} options - Options
- * @param {Function} options.fetcher - Custom fetch function (for testing)
- * @returns {Promise<object>} Parsed report data
  */
-export const fetchReport = async (reportUrl, options = {}) => {
+export const fetchReport = async (
+  reportUrl: string | null | undefined,
+  options: FetchOptions = {},
+): Promise<ReportDetails> => {
   if (!isValidReportUrl(reportUrl)) {
     return { found: false, error: "Invalid report URL" };
   }
 
-  const fetcher = options.fetcher || fetch;
-  const response = await fetcher(reportUrl, {
+  const fetcher = options.fetcher ?? fetch;
+  const response = await fetcher(reportUrl as string, {
     headers: { "User-Agent": USER_AGENT },
     redirect: "manual",
   });
@@ -544,10 +517,51 @@ export const fetchReport = async (reportUrl, options = {}) => {
     return { found: false, error: `Report fetch error: ${response.status}` };
   }
 
-  if (isPdfContent(response)) {
-    return { found: false, isPdf: true, error: "Report is a PDF, not HTML" };
-  }
+  const pdfResult = checkForPdfContent(response);
+  if (pdfResult) return pdfResult;
 
   const html = await response.text();
   return parseReportPage(html);
+};
+
+/**
+ * Fetch detailed report data for a single annual report
+ */
+export const fetchReportDetails = async (
+  report: AnnualReport | null | undefined,
+  options: FetchOptions = {},
+): Promise<AnnualReport> => {
+  if (!report?.url) {
+    return {
+      ...(report ?? ({} as AnnualReport)),
+      details: null,
+      detailsError: "No report URL",
+    };
+  }
+
+  const details = await fetchReport(report.url, options);
+
+  if (!details.found) {
+    return { ...report, details: null, detailsError: details.error };
+  }
+
+  return { ...report, details };
+};
+
+/**
+ * Fetch detailed reports for all annual reports of a tag
+ */
+export const fetchAllReportDetails = async (
+  tagData: TagResult | null | undefined,
+  options: FetchOptions = {},
+): Promise<TagResult> => {
+  if (!tagData?.found || !tagData?.annualReports?.length) {
+    return tagData as TagResult;
+  }
+
+  const detailedReports = await Promise.all(
+    tagData.annualReports.map((report) => fetchReportDetails(report, options)),
+  );
+
+  return { ...tagData, annualReports: detailedReports };
 };

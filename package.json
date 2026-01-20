@@ -9,18 +9,23 @@
     "#test-utils": "./chobble-template/packages/js-toolkit/test-utils/index.js",
     "#test-utils/*": "./chobble-template/packages/js-toolkit/test-utils/*",
     "#src/*": "./src/*",
-    "#test/*": "./test/*"
+    "#test/*": "./test/*",
+    "#lib/*": "./src/lib/*"
   },
   "scripts": {
-    "serve": "bun bin/serve.js",
+    "build:edge": "bun scripts/build-edge.ts",
     "test": "bun test",
-    "lint": "bunx @biomejs/biome check --error-on-warnings src test",
-    "lint:fix": "bunx @biomejs/biome check --write src test",
-    "cpd": "jscpd",
-    "precommit": "bun test/precommit.js"
+    "test:coverage": "bun test --coverage",
+    "lint": "bunx @biomejs/biome check --error-on-warnings src test scripts",
+    "lint:fix": "bunx @biomejs/biome check --write src test scripts",
+    "cpd": "bunx jscpd src --config .jscpd.json",
+    "typecheck": "bunx tsc --noEmit",
+    "precommit": "bun run typecheck && bun run lint && bun run cpd && bun run test:coverage"
   },
   "devDependencies": {
-    "jscpd": "^4.0.5"
+    "@types/bun": "^1.1.0",
+    "jscpd": "^4.0.5",
+    "typescript": "^5.8.0"
   },
   "dependencies": {
     "node-html-parser": "^7.0.2"
