@@ -591,6 +591,24 @@ describe("extractDeviceInfo", () => {
     const result = extractDeviceInfo("<html><body>Not a report</body></html>");
     expect(Object.keys(result).length).toBe(0);
   });
+
+  test("handles Device header outside of table element", () => {
+    // Edge case: "Device" th with colspan but not inside a table
+    const html = `
+      <div>
+        <th colspan="4">Device</th>
+      </div>
+      <table>
+        <tr>
+          <td><div class="label">PIPA Reference Number:</div></td>
+          <td><div class="detail">12345</div></td>
+        </tr>
+      </table>
+    `;
+    const result = extractDeviceInfo(html);
+    // Should fall back to root search and find the field
+    expect(result.pipaReferenceNumber).toBe("12345");
+  });
 });
 
 describe("extractDimensions", () => {
@@ -719,6 +737,30 @@ describe("extractInspectionSections", () => {
     const result = extractInspectionSections(html);
     expect(result.areaSurround).toBeDefined();
     expect(result.areaSurround[0].label).toBe("Play Area m²");
+  });
+
+  test("handles th[colspan] outside of table element", () => {
+    // Edge case: th with colspan but not inside a table (malformed HTML)
+    const html = `
+      <div>
+        <th colspan="4">Orphan Header</th>
+      </div>
+      <table class="table">
+        <thead>
+          <tr><th colspan="4">Valid Section</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><div class="label">Test Field:</div></td>
+            <td><div class="detail">Value</div></td>
+          </tr>
+        </tbody>
+      </table>
+    `;
+    const result = extractInspectionSections(html);
+    // Should skip the orphan th and still find the valid section
+    expect(result.validSection).toBeDefined();
+    expect(result.orphanHeader).toBeUndefined();
   });
 });
 
