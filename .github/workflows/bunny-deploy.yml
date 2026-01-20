@@ -1,0 +1,21 @@
+name: Deploy to Bunny Edge Scripting
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Deploy Script to Bunny Edge Scripting
+        uses: BunnyWay/actions/deploy-script@main
+        with:
+          script_id: ${{ vars.BUNNY_SCRIPT_ID }}
+          file: "bunny-script.ts"
+          api_key: ${{ secrets.BUNNY_API_KEY }}
