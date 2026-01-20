@@ -1,17 +1,69 @@
 /**
- * Minimal PIPA Tag Search API Server
- * Usage: bun src/server.js
+ * PIPA Tag Search API - Bunny Edge Script
+ * Entry point for Bunny CDN edge deployment
  */
 
-import { searchTagWithCache } from "#src/pipa-searcher.js";
-
-const PORT = process.env.PORT || 3000;
+import * as BunnySDK from "@bunny.net/edgescript-sdk";
+import { fetchAllReportDetails } from "../lib/report-parser.ts";
+import { searchTag } from "../lib/tag-parser.ts";
+import type { TagResult } from "../lib/types.ts";
+import { initCache, readCache, writeCache } from "./cache.ts";
 
 /**
- * Generate the homepage HTML with search form and API documentation
- * @returns {string} HTML content
+ * Handle cache hit - fetch missing details if needed
  */
-const getHomepageHtml = () => `<!DOCTYPE html>
+const handleCacheHit = async (
+  cached: TagResult,
+  tagId: string,
+): Promise<TagResult> => {
+  const hasDetails = cached.annualReports?.[0]?.details;
+  const needsDetails = cached.annualReports?.length && !hasDetails;
+  if (!needsDetails) return cached;
+
+  const withDetails = await fetchAllReportDetails(cached);
+  await writeCache(tagId, withDetails);
+  return { ...withDetails, fromCache: false };
+};
+
+/**
+ * Fetch fresh tag data with details
+ */
+const fetchFreshData = async (tagId: string): Promise<TagResult> => {
+  const data = await searchTag(tagId);
+  const finalData = data.found ? await fetchAllReportDetails(data) : data;
+  if (finalData.found) {
+    await writeCache(tagId, finalData);
+  }
+  return finalData;
+};
+
+/**
+ * Search tag with caching
+ */
+const searchTagWithCache = async (
+  tagId: string,
+  useCache = true,
+): Promise<TagResult> => {
+  if (useCache) {
+    const cached = await readCache(tagId);
+    if (cached) return handleCacheHit(cached, tagId);
+  }
+  return fetchFreshData(tagId);
+};
+
+/**
+ * Create JSON response
+ */
+const jsonResponse = (data: unknown, status = 200): Response =>
+  new Response(JSON.stringify(data), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+
+/**
+ * Homepage HTML template
+ */
+const getHomepageHtml = (): string => `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -129,45 +181,36 @@ const getHomepageHtml = () => `<!DOCTYPE html>
 
 /**
  * Handle incoming requests
- * @param {Request} req - The incoming request
- * @returns {Promise<Response>} The response
  */
-const handleRequest = async (req) => {
-  const url = new URL(req.url);
+const handleRequest = async (request: Request): Promise<Response> => {
+  const url = new URL(request.url);
 
-  // Homepage with search form
   if (url.pathname === "/" || url.pathname === "") {
     return new Response(getHomepageHtml(), {
-      headers: { "Content-Type": "text/html; charset=utf-8" },
+      headers: { "content-type": "text/html; charset=utf-8" },
     });
   }
 
-  // GET /tag/:id - Search for a PIPA tag
-  // ?noCache=1 bypasses cache read (but still writes to cache)
   if (url.pathname.startsWith("/tag/")) {
     const tagId = url.pathname.slice(5);
     const useCache = !url.searchParams.has("noCache");
-    const result = await searchTagWithCache(tagId, { useCache });
-    return Response.json(result);
+    const result = await searchTagWithCache(tagId, useCache);
+    return jsonResponse(result);
   }
 
-  // Health check
   if (url.pathname === "/health") {
-    return Response.json({ status: "ok" });
+    return jsonResponse({ status: "ok" });
   }
 
-  return Response.json({ error: "Not found" }, { status: 404 });
+  return jsonResponse({ error: "Not found" }, 404);
 };
 
-/**
- * Start the server
- * @param {number} port - Port to listen on
- * @returns {object} Server instance
- */
-export const startServer = (port = PORT) =>
-  Bun.serve({
-    port,
-    fetch: handleRequest,
-  });
+let initialized = false;
 
-export { handleRequest };
+BunnySDK.net.http.serve(async (request: Request): Promise<Response> => {
+  if (!initialized) {
+    await initCache();
+    initialized = true;
+  }
+  return handleRequest(request);
+});

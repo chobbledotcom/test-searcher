@@ -1,379 +1,130 @@
-/**
- * PIPA Tag Search API - Bunny Edge Script
- * With libsql caching
- */
-
+// src/edge/bunny-script.ts
 import * as BunnySDK from "https://esm.sh/@bunny.net/edgescript-sdk@0.10.0";
-import { createClient, type Client } from "https://esm.sh/@libsql/client@0.6.0/web";
-import { parse, type HTMLElement } from "https://esm.sh/node-html-parser@6.1.13";
 
-const BASE_URL = "https://www.pipa.org.uk";
-const SEARCH_API = "/umbraco/Surface/searchSurface/SearchTag";
-const USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+// src/lib/report-parser.ts
+import { parse } from "https://esm.sh/node-html-parser@6.1.13";
 
-interface TagDetails {
-  unitReferenceNo?: string;
-  type?: string;
-  currentOperator?: string;
-  certificateExpiryDate?: string;
-}
+// src/lib/constants.ts
+var BASE_URL = "https://www.pipa.org.uk";
+var SEARCH_API = "/umbraco/Surface/searchSurface/SearchTag";
+var USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+var CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+var CACHE_HOST = "pipa.org.uk";
 
-interface AnnualReport {
-  statusClass: string;
-  url: string;
-  date: string;
-  reportNo: string;
-  inspectionBody: string;
-  status: string;
-  details?: ReportDetails | null;
-  detailsError?: string;
-}
-
-interface ReportDetails {
-  found: boolean;
-  reportId?: string;
-  id?: string;
-  validFrom?: string;
-  expiryDate?: string;
-  inspectionBody?: string;
-  tagNo?: string;
-  deviceType?: string;
-  serialNumber?: string;
-  statusClass?: string;
-  status?: string;
-  imageUrl?: string;
-  reportDetails?: Record<string, string>;
-  device?: Record<string, unknown>;
-  dimensions?: Record<string, string>;
-  userLimits?: Record<string, number | string>;
-  notes?: Record<string, string>;
-  inspectionSections?: Record<string, unknown[]>;
-  fetchedAt?: string;
-  error?: string;
-  isPdf?: boolean;
-  redirectUrl?: string;
-}
-
-interface TagResult {
-  found: boolean;
-  tagId?: string;
-  status?: string;
-  statusClass?: string;
-  certificateUrl?: string | null;
-  reportUrl?: string | null;
-  imageUrl?: string | null;
-  annualReports?: AnnualReport[];
-  fetchedAt?: string;
-  fromCache?: boolean;
-  error?: string;
-}
-
-interface CacheRow {
-  host: string;
-  id: string;
-  cached: string;
-  json: string;
-}
-
-// Database client (lazy initialized)
-let db: Client | null = null;
-
-const getDb = (): Client => {
-  if (!db) {
-    db = createClient({
-      url: process.env.DB_URL!,
-      authToken: process.env.DB_TOKEN,
-    });
-  }
-  return db;
-};
-
-const initCache = async (): Promise<void> => {
-  await getDb().execute(`
-    CREATE TABLE IF NOT EXISTS cache (
-      host TEXT NOT NULL,
-      id TEXT NOT NULL,
-      cached TEXT NOT NULL,
-      json TEXT NOT NULL,
-      PRIMARY KEY (host, id)
-    )
-  `);
-};
-
-const CACHE_HOST = "pipa.org.uk";
-
-const readCache = async (tagId: string): Promise<TagResult | null> => {
-  const result = await getDb().execute({
-    sql: "SELECT json, cached FROM cache WHERE host = ? AND id = ?",
-    args: [CACHE_HOST, tagId],
-  });
-
-  if (result.rows.length === 0) return null;
-
-  const row = result.rows[0] as unknown as CacheRow;
-  const cachedAt = new Date(row.cached).getTime();
-  const age = Date.now() - cachedAt;
-
-  if (age > CACHE_TTL_MS) return null;
-
-  return { ...JSON.parse(row.json), fromCache: true };
-};
-
-const writeCache = async (tagId: string, data: TagResult): Promise<void> => {
-  await getDb().execute({
-    sql: "INSERT OR REPLACE INTO cache (host, id, cached, json) VALUES (?, ?, ?, ?)",
-    args: [CACHE_HOST, tagId, new Date().toISOString(), JSON.stringify(data)],
-  });
-};
-
-const isAllNumbers = (str: string): boolean => {
-  if (!str || str.length === 0) return false;
-  return /^\d+$/.test(str);
-};
-
-const extractText = (html: string, pattern: RegExp): string | null => {
-  const match = html.match(pattern);
-  return match ? match[1].trim() : null;
-};
-
-const extractDetails = (html: string): TagDetails => {
-  const detailsSection = html.match(
-    /check__details">([\s\S]*?)<\/div>\s*<div class="y-spacer/,
-  );
-  if (!detailsSection) return {};
-
-  const section = detailsSection[1];
-  const details: TagDetails = {};
-
-  const unitRef = extractText(
-    section,
-    /Unit Reference No:<\/div>\s*<div[^>]*>([^<]+)/,
-  );
-  if (unitRef) details.unitReferenceNo = unitRef;
-
-  const type = extractText(section, /Type:<\/div>\s*<div[^>]*>([^<]+)/);
-  if (type) details.type = type;
-
-  const operator = extractText(
-    section,
-    /Current Operator:<\/div>\s*<div[^>]*>([^<]+)/,
-  );
-  if (operator) details.currentOperator = operator;
-
-  const expiry = extractText(
-    section,
-    /Certificate Expiry Date:<\/div>\s*<div[^>]*>([^<]+)/,
-  );
-  if (expiry) details.certificateExpiryDate = expiry;
-
-  return details;
-};
-
-const extractAnnualReports = (html: string): AnnualReport[] => {
-  // Updated regex to match new PIPA site structure (2025):
-  // - Date in report__date
-  // - Report No in report__number
-  // - Inspection Body in report__company
-  // - Status in tag tag--small
-  const reportRegex =
-    /<a class="report report--(\w+)" href="([^"]+)"[^>]*>[\s\S]*?report__date[\s\S]*?report__value">([^<]+)[\s\S]*?report__number[\s\S]*?report__value">([^<]+)[\s\S]*?report__company[\s\S]*?report__value">([^<]+)[\s\S]*?tag tag--small">([^<]+)/g;
-
-  const matches = html.matchAll(reportRegex);
-  const reports: AnnualReport[] = [];
-
-  for (const match of matches) {
-    reports.push({
-      statusClass: match[1],
-      url: match[2],
-      date: match[3].trim(),
-      reportNo: match[4].trim(),
-      inspectionBody: match[5].trim(),
-      status: match[6].trim(),
-    });
-  }
-
-  return reports;
-};
-
-const parseTagPage = (html: string, tagId: string): TagResult => {
-  const statusMatch = html.match(/check__image-tag--(\w+)"[^>]*>([^<]+)</i);
-  if (!statusMatch) {
-    return { found: false, tagId };
-  }
-
-  const certificateUrl = extractText(
-    html,
-    /href="(https:\/\/hub\.pipa\.org\.uk\/download\/reports\/certificate\/[^"]+)"/,
-  );
-  const reportUrl = extractText(
-    html,
-    /href="(https:\/\/hub\.pipa\.org\.uk\/public\/reports\/report\/[^"]+)"/,
-  );
-  const imageUrl = extractText(
-    html,
-    /check__image[^>]*>[\s\S]*?<img src="([^"]+)"/,
-  );
-
-  return {
-    found: true,
-    tagId,
-    status: statusMatch[2].trim(),
-    statusClass: statusMatch[1],
-    ...extractDetails(html),
-    certificateUrl,
-    reportUrl,
-    imageUrl,
-    annualReports: extractAnnualReports(html),
-    fetchedAt: new Date().toISOString(),
-  };
-};
-
-const searchTag = async (tagId: string): Promise<TagResult> => {
-  if (!isAllNumbers(tagId)) {
-    return { found: false, error: "Invalid tag ID - must be all numbers" };
-  }
-
-  const searchUrl = `${BASE_URL}${SEARCH_API}?Tag=${tagId}&PageId=1133`;
-  const searchResponse = await fetch(searchUrl, {
-    headers: { "User-Agent": USER_AGENT },
-  });
-
-  if (!searchResponse.ok) {
-    return {
-      found: false,
-      error: `Search API error: ${searchResponse.status}`,
-    };
-  }
-
-  const searchResult = await searchResponse.json();
-
-  if (searchResult.success !== "true") {
-    return { found: false, tagId, error: "Tag not found" };
-  }
-
-  const tagUrl = `${BASE_URL}${searchResult.message}`;
-  const tagResponse = await fetch(tagUrl, {
-    headers: { "User-Agent": USER_AGENT },
-  });
-
-  if (!tagResponse.ok) {
-    return { found: false, error: `Tag page error: ${tagResponse.status}` };
-  }
-
-  const html = await tagResponse.text();
-  return parseTagPage(html, tagId);
-};
-
-// =====================
-// Report Parser Functions
-// =====================
-
-const getDetailFromLabelRow = (label: HTMLElement): string | null => {
+// src/lib/report-parser.ts
+var getDetailFromLabelRow = (label) => {
   const row = label.closest("tr");
-  if (!row) return null;
+  if (!row)
+    return null;
   const detail = row.querySelector(".detail");
   return detail?.text.trim() || null;
 };
-
-const findDetailByLabel = (root: HTMLElement, labelText: string): string | null => {
+var findDetailByLabel = (root, labelText) => {
   const labels = root.querySelectorAll(".label");
   for (const label of labels) {
     if (label.text.trim().startsWith(labelText)) {
       const value = getDetailFromLabelRow(label);
-      if (value) return value;
+      if (value)
+        return value;
     }
   }
   return null;
 };
-
-const extractBadgeFromRow = (row: HTMLElement): { statusClass: string; status: string } | null => {
+var extractFieldsByLabels = (root, fields) => {
+  const result = {};
+  for (const [key, label] of fields) {
+    const value = findDetailByLabel(root, label);
+    if (value)
+      result[key] = value;
+  }
+  return result;
+};
+var extractBadgeFromRow = (row) => {
   const badge = row.querySelector("[class*='badge badge--']");
-  if (!badge) return null;
-  const classAttr = badge.getAttribute("class") || "";
+  if (!badge)
+    return null;
+  const classAttr = badge.getAttribute("class") ?? "";
   const classMatch = classAttr.match(/badge--(\w+)/);
-  if (!classMatch) return null;
+  const statusClass = classMatch?.[1];
+  if (!statusClass)
+    return null;
   return {
-    statusClass: classMatch[1],
-    status: badge.text.trim(),
+    statusClass,
+    status: badge.text.trim()
   };
 };
-
-const getBadgeFromLabelRow = (label: HTMLElement): { statusClass: string; status: string } | null => {
+var getBadgeFromLabelRow = (label) => {
   const row = label.closest("tr");
-  if (!row) return null;
+  if (!row)
+    return null;
   return extractBadgeFromRow(row);
 };
-
-const findBadgeByLabel = (root: HTMLElement, labelText: string): { statusClass: string; status: string } | null => {
+var findBadgeByLabel = (root, labelText) => {
   const labels = root.querySelectorAll(".label");
   for (const label of labels) {
-    if (!label.text.trim().includes(labelText)) continue;
+    if (!label.text.trim().includes(labelText))
+      continue;
     const badgeInfo = getBadgeFromLabelRow(label);
-    if (badgeInfo) return badgeInfo;
+    if (badgeInfo)
+      return badgeInfo;
   }
   return null;
 };
-
-const extractReportId = (root: HTMLElement): string | null => {
+var extractReportId = (root) => {
   const h1 = root.querySelector("h1");
-  if (!h1) return null;
+  if (!h1)
+    return null;
   const headerText = h1.text.trim();
   const match = headerText.match(/Inspection Report\s+(\S+)/);
-  return match?.[1] || null;
+  return match?.[1] ?? null;
 };
-
-const extractStatusBadge = (root: HTMLElement): { statusClass?: string; status?: string } => {
+var extractStatusBadge = (root) => {
   const statusBadge = root.querySelector("[class*='badge badge--']");
-  if (!statusBadge) return {};
-  const classAttr = statusBadge.getAttribute("class") || "";
+  if (!statusBadge)
+    return {};
+  const classAttr = statusBadge.getAttribute("class") ?? "";
   const classMatch = classAttr.match(/badge--(\w+)/);
-  if (!classMatch) return {};
+  if (!classMatch)
+    return {};
   return {
     statusClass: classMatch[1],
-    status: statusBadge.text.trim(),
+    status: statusBadge.text.trim()
   };
 };
-
-const extractImageUrl = (root: HTMLElement): string | null => {
+var extractImageUrl = (root) => {
   const img = root.querySelector('img[src*="hub.pipa.org.uk/content-files"]');
-  if (!img) return null;
+  if (!img)
+    return null;
   const src = img.getAttribute("src");
   return src ? src.replace(/&amp;/g, "&") : null;
 };
-
-const extractIntroFields = (html: string): Record<string, unknown> => {
+var extractIntroFields = (html) => {
   const root = parse(html);
-  const intro: Record<string, unknown> = {};
-
+  const intro = {};
   const reportId = extractReportId(root);
-  if (reportId) intro.reportId = reportId;
-
-  const introFields: [string, string][] = [
+  if (reportId)
+    intro.reportId = reportId;
+  const introFields = [
     ["id", "ID:"],
     ["validFrom", "Inspection Valid from:"],
     ["expiryDate", "Expiry Date:"],
     ["inspectionBody", "Inspection Body:"],
     ["tagNo", "Tag No:"],
     ["deviceType", "Device Type:"],
-    ["serialNumber", "Serial Number:"],
+    ["serialNumber", "Serial Number:"]
   ];
-
   for (const [key, label] of introFields) {
     const value = findDetailByLabel(root, label);
-    if (value) intro[key] = value;
+    if (value)
+      intro[key] = value;
   }
-
   Object.assign(intro, extractStatusBadge(root));
-
   const imageUrl = extractImageUrl(root);
-  if (imageUrl) intro.imageUrl = imageUrl;
-
+  if (imageUrl)
+    intro.imageUrl = imageUrl;
   return intro;
 };
-
-const findSectionTable = (root: HTMLElement, headerText: string): HTMLElement | null => {
+var findSectionTable = (root, headerText) => {
   const headers = root.querySelectorAll("th[colspan]");
   for (const th of headers) {
     if (th.text.trim() === headerText) {
@@ -385,224 +136,174 @@ const findSectionTable = (root: HTMLElement, headerText: string): HTMLElement | 
   }
   return null;
 };
-
-const extractReportDetailsSection = (html: string): Record<string, string> => {
+var REPORT_DETAIL_FIELDS = [
+  ["creationDate", "Creation Date:"],
+  ["inspectionDate", "Inspection Date:"],
+  ["placeOfInspection", "Place of Inspection:"],
+  ["inspector", "Inspector:"],
+  ["structureVersion", "Structure version:"],
+  ["indoorUseOnly", "Tested for Indoor Use Only:"]
+];
+var extractReportDetails = (html) => {
   const root = parse(html);
-  const details: Record<string, string> = {};
-
-  const fields: [string, string][] = [
-    ["creationDate", "Creation Date:"],
-    ["inspectionDate", "Inspection Date:"],
-    ["placeOfInspection", "Place of Inspection:"],
-    ["inspector", "Inspector:"],
-    ["structureVersion", "Structure version:"],
-    ["indoorUseOnly", "Tested for Indoor Use Only:"],
-  ];
-
-  for (const [key, label] of fields) {
-    const value = findDetailByLabel(root, label);
-    if (value) details[key] = value;
-  }
-
-  return details;
+  return extractFieldsByLabels(root, REPORT_DETAIL_FIELDS);
 };
-
-const extractDeviceInfo = (html: string): Record<string, unknown> => {
+var extractDeviceInfo = (html) => {
   const root = parse(html);
-  const device: Record<string, unknown> = {};
-
+  const device = {};
   const deviceSection = findSectionTable(root, "Device");
-
-  const fields: [string, string][] = [
+  const fields = [
     ["pipaReferenceNumber", "PIPA Reference Number:"],
     ["tagNumber", "Tag Number:"],
     ["type", "Type:"],
     ["name", "Name:"],
     ["manufacturer", "Manufacturer:"],
     ["deviceSerialNumber", "Serial Number:"],
-    ["dateManufactured", "Date Manufactured:"],
+    ["dateManufactured", "Date Manufactured:"]
   ];
-
-  const searchRoot = deviceSection || root;
-
+  const searchRoot = deviceSection ?? root;
   for (const [key, label] of fields) {
     const value = findDetailByLabel(searchRoot, label);
-    if (value) device[key] = value;
+    if (value)
+      device[key] = value;
   }
-
   const manualStatus = findBadgeByLabel(root, "operation manual present");
-  if (manualStatus) device.operationManualPresent = manualStatus;
-
+  if (manualStatus)
+    device.operationManualPresent = manualStatus;
   return device;
 };
-
-const extractBadgeStatus = (row: HTMLElement, field: Record<string, unknown>): void => {
+var extractBadgeStatus = (row, field) => {
   const badgeInfo = extractBadgeFromRow(row);
   if (badgeInfo) {
     field.statusClass = badgeInfo.statusClass;
     field.status = badgeInfo.status;
   }
 };
-
-const extractDetailValues = (row: HTMLElement, field: Record<string, unknown>): void => {
+var extractDetailValues = (row, field) => {
   const details = row.querySelectorAll(".detail");
-  const values: string[] = [];
+  const values = [];
   for (const detail of details) {
     const val = detail.text.trim();
-    if (val) values.push(val);
+    if (val)
+      values.push(val);
   }
   if (values.length > 0) {
     field.value = values.join(" ").trim();
   }
 };
-
-const extractRowNotes = (row: HTMLElement, field: Record<string, unknown>): void => {
+var extractRowNotes = (row, field) => {
   const notesDiv = row.querySelector(".text");
-  if (!notesDiv) return;
+  if (!notesDiv)
+    return;
   const notes = notesDiv.text.trim();
   if (notes && notes !== "&nbsp;" && notes !== "") {
     field.notes = notes;
   }
 };
-
-const parseInspectionRow = (row: HTMLElement): Record<string, unknown> | null => {
+var parseInspectionRow = (row) => {
   const labelDiv = row.querySelector(".label");
-  if (!labelDiv) return null;
-
-  const field: Record<string, unknown> = { label: labelDiv.text.trim().replace(/:$/, "") };
-  extractBadgeStatus(row, field);
-  extractDetailValues(row, field);
-  extractRowNotes(row, field);
-
+  if (!labelDiv)
+    return null;
+  const field = {
+    label: labelDiv.text.trim().replace(/:$/, "")
+  };
+  const fieldRecord = field;
+  extractBadgeStatus(row, fieldRecord);
+  extractDetailValues(row, fieldRecord);
+  extractRowNotes(row, fieldRecord);
   return field;
 };
-
-const sectionNameToKey = (name: string): string =>
-  name
-    .toLowerCase()
-    .replace(/[,&]/g, "")
-    .replace(/\s+(\w)/g, (_, c) => c.toUpperCase());
-
-const SKIP_SECTIONS = new Set(["Report Details", "Device"]);
-
-const processSection = (th: HTMLElement): { key: string; fields: unknown[] } | null => {
+var sectionNameToKey = (name) => name.toLowerCase().replace(/[,&]/g, "").replace(/\s+(\w)/g, (_, c) => c.toUpperCase());
+var SKIP_SECTIONS = new Set(["Report Details", "Device"]);
+var processSection = (th) => {
   const sectionName = th.text.trim();
-  if (SKIP_SECTIONS.has(sectionName)) return null;
-
+  if (SKIP_SECTIONS.has(sectionName))
+    return null;
   const table = th.closest("table");
-  if (!table) return null;
-
+  if (!table)
+    return null;
   const tbody = table.querySelector("tbody");
-  if (!tbody) return null;
-
+  if (!tbody)
+    return null;
   const rows = tbody.querySelectorAll("tr");
-  const fields: unknown[] = [];
-
+  const fields = [];
   for (const row of rows) {
     const field = parseInspectionRow(row);
-    if (field) fields.push(field);
+    if (field)
+      fields.push(field);
   }
-
-  if (fields.length === 0) return null;
-
+  if (fields.length === 0)
+    return null;
   return { key: sectionNameToKey(sectionName), fields };
 };
-
-const extractInspectionSections = (html: string): Record<string, unknown[]> => {
+var extractInspectionSections = (html) => {
   const root = parse(html);
-  const sections: Record<string, unknown[]> = {};
-
+  const sections = {};
   const headers = root.querySelectorAll("th[colspan]");
   for (const th of headers) {
     const result = processSection(th);
-    if (result) sections[result.key] = result.fields;
+    if (result)
+      sections[result.key] = result.fields;
   }
-
   return sections;
 };
-
-const extractUserLimits = (html: string): Record<string, number | string> => {
+var extractUserLimits = (html) => {
   const root = parse(html);
-  const limits: Record<string, number | string> = {};
-
-  const heightPatterns: [string, string][] = [
+  const limits = {};
+  const heightPatterns = [
     ["upTo1_0m", "Max Number of Users of Height up to 1.0m:"],
     ["upTo1_2m", "Max Number of Users of Height up to 1.2m:"],
     ["upTo1_5m", "Max Number of Users of Height up to 1.5m:"],
-    ["upTo1_8m", "Max Number of Users of Height up to 1.8m:"],
+    ["upTo1_8m", "Max Number of Users of Height up to 1.8m:"]
   ];
-
   for (const [key, label] of heightPatterns) {
     const value = findDetailByLabel(root, label);
     if (value) {
-      const num = parseInt(value, 10);
-      if (!isNaN(num)) {
+      const num = Number.parseInt(value, 10);
+      if (!Number.isNaN(num)) {
         limits[key] = num;
       }
     }
   }
-
   const customValue = findDetailByLabel(root, "Custom Max User Height:");
   if (customValue) {
     limits.customMaxHeight = customValue;
   }
-
   return limits;
 };
-
-const extractNotes = (html: string): Record<string, string> => {
+var NOTES_FIELDS = [
+  ["additionalNotes", "Additional Notes:"],
+  ["riskAssessmentNotes", "Risk Assessment Notes:"],
+  ["repairsNeeded", "Repairs needed to pass inspection:"],
+  ["advisoryItems", "Advisory items"]
+];
+var processNoteValues = (notes) => Object.fromEntries(Object.entries(notes).map(([k, v]) => [k, v.replace(/&#xA;/g, `
+`)]));
+var extractNotes = (html) => {
   const root = parse(html);
-  const notes: Record<string, string> = {};
-
-  const fields: [string, string][] = [
-    ["additionalNotes", "Additional Notes:"],
-    ["riskAssessmentNotes", "Risk Assessment Notes:"],
-    ["repairsNeeded", "Repairs needed to pass inspection:"],
-    ["advisoryItems", "Advisory items"],
-  ];
-
-  for (const [key, label] of fields) {
-    const value = findDetailByLabel(root, label);
-    if (value) {
-      const processed = value.replace(/&#xA;/g, "\n");
-      notes[key] = processed;
-    }
-  }
-
-  return notes;
+  const rawNotes = extractFieldsByLabels(root, NOTES_FIELDS);
+  return processNoteValues(rawNotes);
 };
-
-const extractDimensions = (html: string): Record<string, string> => {
+var DIMENSION_FIELDS = [
+  ["length", "Length:"],
+  ["width", "Width:"],
+  ["height", "Height:"]
+];
+var extractDimensions = (html) => {
   const root = parse(html);
-  const dimensions: Record<string, string> = {};
-
-  const fields: [string, string][] = [
-    ["length", "Length:"],
-    ["width", "Width:"],
-    ["height", "Height:"],
-  ];
-
-  for (const [key, label] of fields) {
-    const value = findDetailByLabel(root, label);
-    if (value) dimensions[key] = value;
-  }
-
-  return dimensions;
+  return extractFieldsByLabels(root, DIMENSION_FIELDS);
 };
-
-const parseReportPage = (html: string): ReportDetails => {
+var parseReportPage = (html) => {
   if (!html.includes("Inspection Report") && !html.includes("badge badge--")) {
     return { found: false };
   }
-
   const intro = extractIntroFields(html);
-  const reportDetails = extractReportDetailsSection(html);
+  const reportDetails = extractReportDetails(html);
   const device = extractDeviceInfo(html);
   const dimensions = extractDimensions(html);
   const userLimits = extractUserLimits(html);
   const notes = extractNotes(html);
   const sections = extractInspectionSections(html);
-
   return {
     found: true,
     ...intro,
@@ -612,112 +313,259 @@ const parseReportPage = (html: string): ReportDetails => {
     userLimits,
     notes,
     inspectionSections: sections,
-    fetchedAt: new Date().toISOString(),
-  } as ReportDetails;
+    fetchedAt: new Date().toISOString()
+  };
 };
-
-const isValidReportUrl = (url: string): boolean => url?.includes("hub.pipa.org.uk");
-
-const fetchReport = async (reportUrl: string): Promise<ReportDetails> => {
-  if (!isValidReportUrl(reportUrl)) {
-    return { found: false, error: "Invalid report URL" };
-  }
-
-  const response = await fetch(reportUrl, {
-    headers: { "User-Agent": USER_AGENT },
-    redirect: "manual",
-  });
-
+var isValidReportUrl = (url) => url?.includes("hub.pipa.org.uk") ?? false;
+var checkForRedirect = (response) => {
   if (response.status >= 300 && response.status < 400) {
     return {
       found: false,
       isPdf: true,
-      redirectUrl: response.headers.get("location") || undefined,
-      error: "Report is a PDF download, not an HTML page",
+      redirectUrl: response.headers.get("location") ?? undefined,
+      error: "Report is a PDF download, not an HTML page"
     };
   }
-
-  if (!response.ok) {
-    return { found: false, error: `Report fetch error: ${response.status}` };
-  }
-
-  const contentType = response.headers.get("content-type") || "";
+  return null;
+};
+var checkForPdfContent = (response) => {
+  const contentType = response.headers.get("content-type") ?? "";
   if (contentType.includes("application/pdf")) {
     return { found: false, isPdf: true, error: "Report is a PDF, not HTML" };
   }
-
+  return null;
+};
+var fetchReport = async (reportUrl, options = {}) => {
+  if (!isValidReportUrl(reportUrl)) {
+    return { found: false, error: "Invalid report URL" };
+  }
+  const fetcher = options.fetcher ?? fetch;
+  const response = await fetcher(reportUrl, {
+    headers: { "User-Agent": USER_AGENT },
+    redirect: "manual"
+  });
+  const redirectResult = checkForRedirect(response);
+  if (redirectResult)
+    return redirectResult;
+  if (!response.ok) {
+    return { found: false, error: `Report fetch error: ${response.status}` };
+  }
+  const pdfResult = checkForPdfContent(response);
+  if (pdfResult)
+    return pdfResult;
   const html = await response.text();
   return parseReportPage(html);
 };
-
-const fetchReportDetails = async (report: AnnualReport): Promise<AnnualReport> => {
+var fetchReportDetails = async (report, options = {}) => {
   if (!report?.url) {
-    return { ...report, details: null, detailsError: "No report URL" };
+    return {
+      ...report ?? {},
+      details: null,
+      detailsError: "No report URL"
+    };
   }
-
-  const details = await fetchReport(report.url);
-
+  const details = await fetchReport(report.url, options);
   if (!details.found) {
     return { ...report, details: null, detailsError: details.error };
   }
-
   return { ...report, details };
 };
-
-const fetchAllReportDetails = async (tagData: TagResult): Promise<TagResult> => {
+var fetchAllReportDetails = async (tagData, options = {}) => {
   if (!tagData?.found || !tagData?.annualReports?.length) {
     return tagData;
   }
-
-  const detailedReports = await Promise.all(
-    tagData.annualReports.map((report) => fetchReportDetails(report))
-  );
-
+  const detailedReports = await Promise.all(tagData.annualReports.map((report) => fetchReportDetails(report, options)));
   return { ...tagData, annualReports: detailedReports };
 };
 
-// =====================
-// Cache Functions
-// =====================
-
-const searchTagWithCache = async (tagId: string, useCache = true): Promise<TagResult> => {
-  // Only read from cache if useCache is true
-  if (useCache) {
-    const cached = await readCache(tagId);
-    if (cached) {
-      // Fetch details if not already in cache
-      const hasDetails = cached.annualReports?.[0]?.details;
-      if (cached.annualReports?.length && !hasDetails) {
-        const withDetails = await fetchAllReportDetails(cached);
-        await writeCache(tagId, withDetails);
-        return { ...withDetails, fromCache: false };
-      }
-      return cached;
+// src/lib/tag-parser.ts
+var isAllNumbers = (str) => {
+  if (!str || str.length === 0)
+    return false;
+  return /^\d+$/.test(str);
+};
+var extractText = (html, pattern) => {
+  const match = html.match(pattern);
+  return match?.[1]?.trim() ?? null;
+};
+var extractDetails = (html) => {
+  const detailsSection = html.match(/check__details">([\s\S]*?)<\/div>\s*<div class="y-spacer/);
+  if (!detailsSection?.[1])
+    return {};
+  const section = detailsSection[1];
+  const details = {};
+  const unitRef = extractText(section, /Unit Reference No:<\/div>\s*<div[^>]*>([^<]+)/);
+  if (unitRef)
+    details.unitReferenceNo = unitRef;
+  const type = extractText(section, /Type:<\/div>\s*<div[^>]*>([^<]+)/);
+  if (type)
+    details.type = type;
+  const operator = extractText(section, /Current Operator:<\/div>\s*<div[^>]*>([^<]+)/);
+  if (operator)
+    details.currentOperator = operator;
+  const expiry = extractText(section, /Certificate Expiry Date:<\/div>\s*<div[^>]*>([^<]+)/);
+  if (expiry)
+    details.certificateExpiryDate = expiry;
+  return details;
+};
+var extractAnnualReports = (html) => {
+  const reportRegex = /<a class="report report--(\w+)" href="([^"]+)"[^>]*>[\s\S]*?report__date[\s\S]*?report__value">([^<]+)[\s\S]*?report__number[\s\S]*?report__value">([^<]+)[\s\S]*?report__company[\s\S]*?report__value">([^<]+)[\s\S]*?tag tag--small">([^<]+)/g;
+  const matches = html.matchAll(reportRegex);
+  const reports = [];
+  for (const match of matches) {
+    const statusClass = match[1];
+    const url = match[2];
+    const date = match[3];
+    const reportNo = match[4];
+    const inspectionBody = match[5];
+    const status = match[6];
+    if (statusClass && url && date && reportNo && inspectionBody && status) {
+      reports.push({
+        statusClass,
+        url,
+        date: date.trim(),
+        reportNo: reportNo.trim(),
+        inspectionBody: inspectionBody.trim(),
+        status: status.trim()
+      });
     }
   }
+  return reports;
+};
+var parseTagPage = (html, tagId) => {
+  const statusMatch = html.match(/check__image-tag--(\w+)"[^>]*>([^<]+)</i);
+  const statusClass = statusMatch?.[1];
+  const statusText = statusMatch?.[2];
+  if (!statusClass || !statusText) {
+    return { found: false, tagId };
+  }
+  const certificateUrl = extractText(html, /href="(https:\/\/hub\.pipa\.org\.uk\/download\/reports\/certificate\/[^"]+)"/);
+  const reportUrl = extractText(html, /href="(https:\/\/hub\.pipa\.org\.uk\/public\/reports\/report\/[^"]+)"/);
+  const imageUrl = extractText(html, /check__image[^>]*>[\s\S]*?<img src="([^"]+)"/);
+  return {
+    found: true,
+    tagId,
+    status: statusText.trim(),
+    statusClass,
+    ...extractDetails(html),
+    certificateUrl,
+    reportUrl,
+    imageUrl,
+    annualReports: extractAnnualReports(html),
+    fetchedAt: new Date().toISOString()
+  };
+};
+var fetchWithUserAgent = (url, fetcher) => fetcher(url, { headers: { "User-Agent": USER_AGENT } });
+var fetchSearchApi = async (tagId, fetcher) => {
+  const searchUrl = `${BASE_URL}${SEARCH_API}?Tag=${tagId}&PageId=1133`;
+  const response = await fetchWithUserAgent(searchUrl, fetcher);
+  if (!response.ok)
+    return { ok: false, status: response.status };
+  const data = await response.json();
+  return { ok: true, data };
+};
+var fetchTagPage = async (tagPath, fetcher) => {
+  const tagUrl = `${BASE_URL}${tagPath}`;
+  const response = await fetchWithUserAgent(tagUrl, fetcher);
+  if (!response.ok)
+    return { ok: false, status: response.status };
+  const html = await response.text();
+  return { ok: true, html };
+};
+var searchTag = async (tagId, options = {}) => {
+  const fetcher = options.fetcher ?? fetch;
+  if (!isAllNumbers(tagId)) {
+    return { found: false, error: "Invalid tag ID - must be all numbers" };
+  }
+  const searchResult = await fetchSearchApi(tagId, fetcher);
+  if (!searchResult.ok) {
+    return { found: false, error: `Search API error: ${searchResult.status}` };
+  }
+  if (searchResult.data?.success !== "true") {
+    return { found: false, tagId, error: "Tag not found" };
+  }
+  const tagResult = await fetchTagPage(searchResult.data.message, fetcher);
+  if (!tagResult.ok) {
+    return { found: false, error: `Tag page error: ${tagResult.status}` };
+  }
+  return parseTagPage(tagResult.html ?? "", tagId);
+};
 
+// src/edge/cache.ts
+import { createClient } from "https://esm.sh/@libsql/client@0.6.0/web";
+var db = null;
+var getDb = () => {
+  if (!db) {
+    db = createClient({
+      url: process.env.DB_URL,
+      authToken: process.env.DB_TOKEN
+    });
+  }
+  return db;
+};
+var initCache = async () => {
+  await getDb().execute(`
+    CREATE TABLE IF NOT EXISTS cache (
+      host TEXT NOT NULL,
+      id TEXT NOT NULL,
+      cached TEXT NOT NULL,
+      json TEXT NOT NULL,
+      PRIMARY KEY (host, id)
+    )
+  `);
+};
+var readCache = async (tagId) => {
+  const result = await getDb().execute({
+    sql: "SELECT json, cached FROM cache WHERE host = ? AND id = ?",
+    args: [CACHE_HOST, tagId]
+  });
+  if (result.rows.length === 0)
+    return null;
+  const row = result.rows[0];
+  const cachedAt = new Date(row.cached).getTime();
+  const age = Date.now() - cachedAt;
+  if (age > CACHE_TTL_MS)
+    return null;
+  return { ...JSON.parse(row.json), fromCache: true };
+};
+var writeCache = async (tagId, data) => {
+  await getDb().execute({
+    sql: "INSERT OR REPLACE INTO cache (host, id, cached, json) VALUES (?, ?, ?, ?)",
+    args: [CACHE_HOST, tagId, new Date().toISOString(), JSON.stringify(data)]
+  });
+};
+
+// src/edge/bunny-script.ts
+var handleCacheHit = async (cached, tagId) => {
+  const hasDetails = cached.annualReports?.[0]?.details;
+  const needsDetails = cached.annualReports?.length && !hasDetails;
+  if (!needsDetails)
+    return cached;
+  const withDetails = await fetchAllReportDetails(cached);
+  await writeCache(tagId, withDetails);
+  return { ...withDetails, fromCache: false };
+};
+var fetchFreshData = async (tagId) => {
   const data = await searchTag(tagId);
-
-  // Always fetch report details for found tags
-  const finalData = data.found
-    ? await fetchAllReportDetails(data)
-    : data;
-
-  // Always write to cache if found (even when bypassing read)
+  const finalData = data.found ? await fetchAllReportDetails(data) : data;
   if (finalData.found) {
     await writeCache(tagId, finalData);
   }
-
   return finalData;
 };
-
-const jsonResponse = (data: unknown, status = 200): Response =>
-  new Response(JSON.stringify(data), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
-
-const getHomepageHtml = (): string => `<!DOCTYPE html>
+var searchTagWithCache = async (tagId, useCache = true) => {
+  if (useCache) {
+    const cached = await readCache(tagId);
+    if (cached)
+      return handleCacheHit(cached, tagId);
+  }
+  return fetchFreshData(tagId);
+};
+var jsonResponse = (data, status = 200) => new Response(JSON.stringify(data), {
+  status,
+  headers: { "content-type": "application/json" }
+});
+var getHomepageHtml = () => `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -832,35 +680,29 @@ const getHomepageHtml = (): string => `<!DOCTYPE html>
   </script>
 </body>
 </html>`;
-
-// Initialize cache table on startup
-let initialized = false;
-
-BunnySDK.net.http.serve(async (request: Request): Promise<Response> => {
-  if (!initialized) {
-    await initCache();
-    initialized = true;
-  }
-
+var handleRequest = async (request) => {
   const url = new URL(request.url);
-
-  // Homepage with search form
   if (url.pathname === "/" || url.pathname === "") {
     return new Response(getHomepageHtml(), {
-      headers: { "content-type": "text/html; charset=utf-8" },
+      headers: { "content-type": "text/html; charset=utf-8" }
     });
   }
-
   if (url.pathname.startsWith("/tag/")) {
     const tagId = url.pathname.slice(5);
     const useCache = !url.searchParams.has("noCache");
     const result = await searchTagWithCache(tagId, useCache);
     return jsonResponse(result);
   }
-
   if (url.pathname === "/health") {
     return jsonResponse({ status: "ok" });
   }
-
   return jsonResponse({ error: "Not found" }, 404);
+};
+var initialized = false;
+BunnySDK.net.http.serve(async (request) => {
+  if (!initialized) {
+    await initCache();
+    initialized = true;
+  }
+  return handleRequest(request);
 });
