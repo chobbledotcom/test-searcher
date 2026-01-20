@@ -14,6 +14,20 @@ describe("PIPA API Server", () => {
     server.stop();
   });
 
+  test("GET / returns homepage with search form", async () => {
+    const response = await fetch(`${baseUrl}/`);
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/html");
+    expect(html).toContain("<title>PIPA Tag Search</title>");
+    expect(html).toContain('select id="host"');
+    expect(html).toContain("Please select");
+    expect(html).toContain("pipa.org.uk");
+    expect(html).toContain('input type="text" id="unitId"');
+    expect(html).toContain("API Documentation");
+  });
+
   test("GET /health returns ok status", async () => {
     const response = await fetch(`${baseUrl}/health`);
     const data = await response.json();
