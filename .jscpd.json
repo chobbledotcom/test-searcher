@@ -1,0 +1,17 @@
+{
+  "threshold": 0,
+  "reporters": ["console", "json"],
+  "output": ".jscpd-report",
+  "ignore": [
+    "**/node_modules/**",
+    "**/chobble-template/**",
+    "**/coverage/**",
+    "**/package-lock.json"
+  ],
+  "format": ["javascript", "json"],
+  "absolute": false,
+  "gitignore": true,
+  "exitCode": 1,
+  "minLines": 1,
+  "minTokens": 40
+}

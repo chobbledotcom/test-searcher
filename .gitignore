@@ -1,0 +1,4 @@
+node_modules/
+.jscpd-report/
+coverage/
+bun.lock
