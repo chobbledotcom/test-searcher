@@ -5,6 +5,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -18,4 +22,4 @@ jobs:
         with:
           script_id: ${{ secrets.BUNNY_SCRIPT_ID }}
           file: "bunny-script.ts"
-          api_key: ${{ secrets.BUNNY_API_KEY }}
+          api_key: ${{ secrets.BUNNY_SCRIPT_DEPLOYMENT_KEY }}
