@@ -1,0 +1,248 @@
+/**
+ * PIPA Tag Searcher
+ * Fetches and parses PIPA tag information from pipa.org.uk
+ */
+
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
+
+const BASE_URL = "https://www.pipa.org.uk";
+const SEARCH_API = "/umbraco/Surface/searchSurface/SearchTag";
+const USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+/**
+ * Check if a string contains only digits
+ * @param {string} str - The string to check
+ * @returns {boolean} True if the string is all numbers
+ */
+export const isAllNumbers = (str) => {
+  if (!str || str.length === 0) return false;
+  return /^\d+$/.test(str);
+};
+
+/**
+ * Extract text content from between HTML tags
+ * @param {string} html - HTML string to search
+ * @param {string} pattern - Regex pattern with capture group
+ * @returns {string|null} Extracted text or null
+ */
+const extractText = (html, pattern) => {
+  const match = html.match(pattern);
+  return match ? match[1].trim() : null;
+};
+
+/**
+ * Extract details from the check__details HTML section
+ * @param {string} html - Full HTML content
+ * @returns {object} Extracted details
+ */
+const extractDetails = (html) => {
+  const detailsSection = html.match(
+    /check__details">([\s\S]*?)<\/div>\s*<div class="y-spacer/,
+  );
+  if (!detailsSection) return {};
+
+  const section = detailsSection[1];
+  const details = {};
+
+  const unitRef = extractText(
+    section,
+    /Unit Reference No:<\/div>\s*<div[^>]*>([^<]+)/,
+  );
+  if (unitRef) details.unitReferenceNo = unitRef;
+
+  const type = extractText(section, /Type:<\/div>\s*<div[^>]*>([^<]+)/);
+  if (type) details.type = type;
+
+  const operator = extractText(
+    section,
+    /Current Operator:<\/div>\s*<div[^>]*>([^<]+)/,
+  );
+  if (operator) details.currentOperator = operator;
+
+  const expiry = extractText(
+    section,
+    /Certificate Expiry Date:<\/div>\s*<div[^>]*>([^<]+)/,
+  );
+  if (expiry) details.certificateExpiryDate = expiry;
+
+  return details;
+};
+
+/**
+ * Extract annual reports from HTML
+ * @param {string} html - Full HTML content
+ * @returns {Array} Array of report objects
+ */
+const extractAnnualReports = (html) => {
+  const reportRegex =
+    /<a class="report report--(\w+)" href="([^"]+)"[^>]*>[\s\S]*?Date:<\/div>\s*<div[^>]*>([^<]+)[\s\S]*?Inspector:<\/div>\s*<div[^>]*>([^<]+)[\s\S]*?Status:<\/div>\s*<div[^>]*>([^<]+)/g;
+
+  const matches = html.matchAll(reportRegex);
+  const reports = [];
+
+  for (const match of matches) {
+    reports.push({
+      statusClass: match[1],
+      url: match[2],
+      date: match[3].trim(),
+      inspector: match[4].trim(),
+      status: match[5].trim(),
+    });
+  }
+
+  return reports;
+};
+
+/**
+ * Parse the PIPA tag details page HTML and extract data
+ * @param {string} html - The HTML content of the tag page
+ * @param {string} tagId - The tag ID being searched
+ * @returns {object} Parsed tag data
+ */
+export const parseTagPage = (html, tagId) => {
+  const statusMatch = html.match(/check__image-tag--(\w+)"[^>]*>([^<]+)</i);
+  if (!statusMatch) {
+    return { found: false, tagId };
+  }
+
+  const certificateUrl = extractText(
+    html,
+    /href="(https:\/\/hub\.pipa\.org\.uk\/download\/reports\/certificate\/[^"]+)"/,
+  );
+  const reportUrl = extractText(
+    html,
+    /href="(https:\/\/hub\.pipa\.org\.uk\/public\/reports\/report\/[^"]+)"/,
+  );
+  const imageUrl = extractText(
+    html,
+    /check__image[^>]*>[\s\S]*?<img src="([^"]+)"/,
+  );
+
+  return {
+    found: true,
+    tagId,
+    status: statusMatch[2].trim(),
+    statusClass: statusMatch[1],
+    ...extractDetails(html),
+    certificateUrl,
+    reportUrl,
+    imageUrl,
+    annualReports: extractAnnualReports(html),
+    fetchedAt: new Date().toISOString(),
+  };
+};
+
+/**
+ * Search for a PIPA tag by ID
+ * @param {string} tagId - The tag ID to search for
+ * @param {object} options - Options
+ * @param {Function} options.fetcher - Custom fetch function (for testing)
+ * @returns {Promise<object>} The tag data or error
+ */
+export const searchTag = async (tagId, options = {}) => {
+  const fetcher = options.fetcher || fetch;
+
+  if (!isAllNumbers(tagId)) {
+    return { found: false, error: "Invalid tag ID - must be all numbers" };
+  }
+
+  const searchUrl = `${BASE_URL}${SEARCH_API}?Tag=${tagId}&PageId=1133`;
+  const searchResponse = await fetcher(searchUrl, {
+    headers: { "User-Agent": USER_AGENT },
+  });
+
+  if (!searchResponse.ok) {
+    return {
+      found: false,
+      error: `Search API error: ${searchResponse.status}`,
+    };
+  }
+
+  const searchResult = await searchResponse.json();
+
+  if (searchResult.success !== "true") {
+    return { found: false, tagId, error: "Tag not found" };
+  }
+
+  const tagUrl = `${BASE_URL}${searchResult.message}`;
+  const tagResponse = await fetcher(tagUrl, {
+    headers: { "User-Agent": USER_AGENT },
+  });
+
+  if (!tagResponse.ok) {
+    return { found: false, error: `Tag page error: ${tagResponse.status}` };
+  }
+
+  const html = await tagResponse.text();
+  return parseTagPage(html, tagId);
+};
+
+/**
+ * Get the cache file path for a tag
+ * @param {string} tagId - The tag ID
+ * @param {string} cacheDir - Base cache directory
+ * @returns {string} Full path to the cache file
+ */
+export const getCachePath = (tagId, cacheDir = "cache/pipa") =>
+  `${cacheDir}/${tagId}.json`;
+
+/**
+ * Read cached tag data if it exists
+ * @param {string} tagId - The tag ID
+ * @param {string} cacheDir - Base cache directory
+ * @returns {Promise<object|null>} Cached data or null
+ */
+export const readCache = async (tagId, cacheDir = "cache/pipa") => {
+  try {
+    const path = getCachePath(tagId, cacheDir);
+    const data = await readFile(path, "utf-8");
+    return JSON.parse(data);
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Write tag data to cache
+ * @param {string} tagId - The tag ID
+ * @param {object} data - The tag data to cache
+ * @param {string} cacheDir - Base cache directory
+ * @returns {Promise<void>}
+ */
+export const writeCache = async (tagId, data, cacheDir = "cache/pipa") => {
+  const path = getCachePath(tagId, cacheDir);
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, JSON.stringify(data, null, 2));
+};
+
+/**
+ * Search for a PIPA tag, using cache if available
+ * @param {string} tagId - The tag ID to search for
+ * @param {object} options - Options
+ * @param {boolean} options.useCache - Whether to use cached data (default: true)
+ * @param {string} options.cacheDir - Cache directory (default: "cache/pipa")
+ * @returns {Promise<object>} The tag data
+ */
+export const searchTagWithCache = async (tagId, options = {}) => {
+  const { useCache = true, cacheDir = "cache/pipa" } = options;
+
+  // Try cache first
+  if (useCache) {
+    const cached = await readCache(tagId, cacheDir);
+    if (cached) {
+      return { ...cached, fromCache: true };
+    }
+  }
+
+  // Fetch fresh data
+  const data = await searchTag(tagId);
+
+  // Cache if found
+  if (data.found) {
+    await writeCache(tagId, data, cacheDir);
+  }
+
+  return data;
+};

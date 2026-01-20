@@ -12,6 +12,7 @@
     "#test/*": "./test/*"
   },
   "scripts": {
+    "serve": "bun bin/serve.js",
     "test": "bun test",
     "lint": "bunx @biomejs/biome check --error-on-warnings src test",
     "lint:fix": "bunx @biomejs/biome check --write src test",

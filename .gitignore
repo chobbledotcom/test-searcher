@@ -1,4 +1,5 @@
 node_modules/
 .jscpd-report/
 coverage/
+cache/
 bun.lock

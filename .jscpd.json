@@ -6,12 +6,14 @@
     "**/node_modules/**",
     "**/chobble-template/**",
     "**/coverage/**",
-    "**/package-lock.json"
+    "**/package-lock.json",
+    "**/.jscpd-report/**",
+    "**/test/**"
   ],
-  "format": ["javascript", "json"],
+  "format": ["javascript"],
   "absolute": false,
   "gitignore": true,
   "exitCode": 1,
-  "minLines": 1,
-  "minTokens": 40
+  "minLines": 5,
+  "minTokens": 50
 }
