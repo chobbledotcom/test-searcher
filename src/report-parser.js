@@ -3,8 +3,125 @@
  * Parses detailed inspection report pages from hub.pipa.org.uk
  */
 
+import { parse } from "node-html-parser";
+
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+/**
+ * Get detail value from a row containing a label
+ * @param {HTMLElement} label - Label element
+ * @returns {string|null} Detail value or null
+ */
+const getDetailFromLabelRow = (label) => {
+  const row = label.closest("tr");
+  if (!row) return null;
+  const detail = row.querySelector(".detail");
+  return detail?.text.trim() || null;
+};
+
+/**
+ * Find a row by label text and extract the detail value
+ * @param {HTMLElement} root - Parsed HTML root
+ * @param {string} labelText - Label text to search for
+ * @returns {string|null} Detail value or null
+ */
+const findDetailByLabel = (root, labelText) => {
+  const labels = root.querySelectorAll(".label");
+  for (const label of labels) {
+    if (label.text.trim().startsWith(labelText)) {
+      const value = getDetailFromLabelRow(label);
+      if (value) return value;
+    }
+  }
+  return null;
+};
+
+/**
+ * Extract badge info from a row
+ * @param {HTMLElement} row - Table row element
+ * @returns {object|null} Badge info or null
+ */
+const extractBadgeFromRow = (row) => {
+  const badge = row.querySelector("[class*='badge badge--']");
+  if (!badge) return null;
+  const classAttr = badge.getAttribute("class") || "";
+  const classMatch = classAttr.match(/badge--(\w+)/);
+  if (!classMatch) return null;
+  return {
+    statusClass: classMatch[1],
+    status: badge.text.trim(),
+  };
+};
+
+/**
+ * Get badge from a label's row
+ * @param {HTMLElement} label - Label element
+ * @returns {object|null} Badge info or null
+ */
+const getBadgeFromLabelRow = (label) => {
+  const row = label.closest("tr");
+  if (!row) return null;
+  return extractBadgeFromRow(row);
+};
+
+/**
+ * Find a badge by label text and extract status info
+ * @param {HTMLElement} root - Parsed HTML root
+ * @param {string} labelText - Label text to search for
+ * @returns {object|null} Status info or null
+ */
+const findBadgeByLabel = (root, labelText) => {
+  const labels = root.querySelectorAll(".label");
+  for (const label of labels) {
+    if (!label.text.trim().includes(labelText)) continue;
+    const badgeInfo = getBadgeFromLabelRow(label);
+    if (badgeInfo) return badgeInfo;
+  }
+  return null;
+};
+
+/**
+ * Extract report ID from header
+ * @param {HTMLElement} root - Parsed HTML root
+ * @returns {string|null} Report ID or null
+ */
+const extractReportId = (root) => {
+  const h1 = root.querySelector("h1");
+  if (!h1) return null;
+  const headerText = h1.text.trim();
+  const match = headerText.match(/Inspection Report\s+(\S+)/);
+  return match?.[1] || null;
+};
+
+/**
+ * Extract status badge info from HTML
+ * @param {HTMLElement} root - Parsed HTML root
+ * @returns {object} Status info
+ */
+const extractStatusBadge = (root) => {
+  const statusBadge = root.querySelector("[class*='badge badge--']");
+  if (!statusBadge) return {};
+  const classAttr = statusBadge.getAttribute("class") || "";
+  const classMatch = classAttr.match(/badge--(\w+)/);
+  if (!classMatch) return {};
+  return {
+    statusClass: classMatch[1],
+    status: statusBadge.text.trim(),
+  };
+};
+
+/**
+ * Extract image URL from HTML
+ * @param {HTMLElement} root - Parsed HTML root
+ * @returns {string|null} Image URL or null
+ */
+const extractImageUrl = (root) => {
+  const img = root.querySelector('img[src*="hub.pipa.org.uk/content-files"]');
+  if (!img) return null;
+  const src = img.getAttribute("src");
+  return src ? src.replace(/&amp;/g, "&") : null;
+};
 
 /**
  * Extract intro section fields from report HTML
@@ -12,64 +129,56 @@ const USER_AGENT =
  * @returns {object} Intro fields
  */
 export const extractIntroFields = (html) => {
+  const root = parse(html);
   const intro = {};
 
-  // Extract from intro table structure
-  const introPatterns = [
-    ["reportId", /Inspection Report\s+([^<\s]+)/],
-    [
-      "id",
-      /<div class="label"[^>]*>ID:<\/div>\s*<\/td>\s*<td>\s*<div class="detail"[^>]*>\s*([^<]+)/i,
-    ],
-    [
-      "validFrom",
-      /Inspection Valid from:<\/div>\s*<\/td>\s*<td>\s*<div class="detail"[^>]*>\s*([^<]+)/i,
-    ],
-    [
-      "expiryDate",
-      /Expiry Date:<\/div>\s*<\/td>\s*<td>\s*<div class="detail"[^>]*>\s*([^<]+)/i,
-    ],
-    [
-      "inspectionBody",
-      /Inspection Body:<\/div>\s*<\/td>\s*<td>\s*<div class="detail"[^>]*>([^<]+)/i,
-    ],
-    [
-      "tagNo",
-      /Tag No:<\/div>\s*<\/td>\s*<td>\s*<div class="detail"[^>]*>([^<]+)/i,
-    ],
-    [
-      "deviceType",
-      /Device Type:<\/div>\s*<\/td>\s*<td>\s*<div class="detail"[^>]*>([^<]+)/i,
-    ],
-    [
-      "serialNumber",
-      /Serial Number:<\/div>\s*<\/td>\s*<td>\s*<div class="detail"[^>]*>([^<]+)/i,
-    ],
+  // Extract report ID from header
+  const reportId = extractReportId(root);
+  if (reportId) intro.reportId = reportId;
+
+  // Extract fields using label search
+  const introFields = [
+    ["id", "ID:"],
+    ["validFrom", "Inspection Valid from:"],
+    ["expiryDate", "Expiry Date:"],
+    ["inspectionBody", "Inspection Body:"],
+    ["tagNo", "Tag No:"],
+    ["deviceType", "Device Type:"],
+    ["serialNumber", "Serial Number:"],
   ];
 
-  for (const [key, pattern] of introPatterns) {
-    const match = html.match(pattern);
-    if (match) {
-      intro[key] = match[1].trim();
-    }
+  for (const [key, label] of introFields) {
+    const value = findDetailByLabel(root, label);
+    if (value) intro[key] = value;
   }
 
   // Extract status with badge class
-  const statusMatch = html.match(/badge badge--(\w+)"[^>]*>([^<]+)/);
-  if (statusMatch) {
-    intro.statusClass = statusMatch[1];
-    intro.status = statusMatch[2].trim();
-  }
+  Object.assign(intro, extractStatusBadge(root));
 
   // Extract main image URL
-  const imageMatch = html.match(
-    /<img[^>]+src="(https:\/\/hub\.pipa\.org\.uk\/content-files\/[^"]+)"/,
-  );
-  if (imageMatch) {
-    intro.imageUrl = imageMatch[1].replace(/&amp;/g, "&");
-  }
+  const imageUrl = extractImageUrl(root);
+  if (imageUrl) intro.imageUrl = imageUrl;
 
   return intro;
+};
+
+/**
+ * Find a section table by header text
+ * @param {HTMLElement} root - Parsed HTML root
+ * @param {string} headerText - Section header text
+ * @returns {HTMLElement|null} tbody element or null
+ */
+const findSectionTable = (root, headerText) => {
+  const headers = root.querySelectorAll("th[colspan]");
+  for (const th of headers) {
+    if (th.text.trim() === headerText) {
+      const table = th.closest("table");
+      if (table) {
+        return table.querySelector("tbody");
+      }
+    }
+  }
+  return null;
 };
 
 /**
@@ -78,44 +187,21 @@ export const extractIntroFields = (html) => {
  * @returns {object} Report details
  */
 export const extractReportDetails = (html) => {
+  const root = parse(html);
   const details = {};
 
-  const patterns = [
-    [
-      "creationDate",
-      /Creation Date:<\/div>\s*<\/td>\s*<td[^>]*>\s*<div class="detail">([^<]+)/i,
-    ],
-    [
-      "inspectionDate",
-      /Inspection Date:<\/div>\s*<\/td>\s*<td[^>]*>\s*<div class="detail">([^<]+)/i,
-    ],
-    [
-      "placeOfInspection",
-      /Place of Inspection:<\/div>\s*<\/td>\s*<td[^>]*>\s*<div class="detail">([^<]+)/i,
-    ],
-    [
-      "inspector",
-      /Inspector:<\/div>\s*<\/td>\s*<td[^>]*>\s*<div class="detail">([^<]+)/i,
-    ],
-    [
-      "structureVersion",
-      /Structure version:<\/div>\s*<\/td>\s*<td[^>]*>\s*<div class="detail">([^<]+)/i,
-    ],
+  const fields = [
+    ["creationDate", "Creation Date:"],
+    ["inspectionDate", "Inspection Date:"],
+    ["placeOfInspection", "Place of Inspection:"],
+    ["inspector", "Inspector:"],
+    ["structureVersion", "Structure version:"],
+    ["indoorUseOnly", "Tested for Indoor Use Only:"],
   ];
 
-  for (const [key, pattern] of patterns) {
-    const match = html.match(pattern);
-    if (match) {
-      details[key] = match[1].trim();
-    }
-  }
-
-  // Indoor use only - Yes/No
-  const indoorMatch = html.match(
-    /Tested for Indoor Use Only:<\/div>[\s\S]*?<div class="detail">([^<]+)/i,
-  );
-  if (indoorMatch) {
-    details.indoorUseOnly = indoorMatch[1].trim();
+  for (const [key, label] of fields) {
+    const value = findDetailByLabel(root, label);
+    if (value) details[key] = value;
   }
 
   return details;
@@ -127,118 +213,94 @@ export const extractReportDetails = (html) => {
  * @returns {object} Device info
  */
 export const extractDeviceInfo = (html) => {
+  const root = parse(html);
   const device = {};
 
-  const patterns = [
-    [
-      "pipaReferenceNumber",
-      /PIPA Reference Number:<\/div>\s*<\/td>\s*<td[^>]*>\s*<div class="detail">([^<]+)/i,
-    ],
-    [
-      "tagNumber",
-      /Tag Number:<\/div>\s*<\/td>\s*<td[^>]*>\s*<div class="detail">([^<]+)/i,
-    ],
-    [
-      "type",
-      /<th colspan="4">Device<\/th>[\s\S]*?Type:<\/div>\s*<\/td>\s*<td[^>]*>\s*<div class="detail">([^<]+)/i,
-    ],
-    [
-      "name",
-      /Name:<\/div>\s*<\/td>\s*<td[^>]*>\s*<div class="detail">([^<]+)/i,
-    ],
-    [
-      "manufacturer",
-      /Manufacturer:<\/div>\s*<\/td>\s*<td[^>]*>\s*<div class="detail">([^<]+)/i,
-    ],
-    [
-      "deviceSerialNumber",
-      /<th colspan="4">Device<\/th>[\s\S]*?Serial Number:<\/div>\s*<\/td>\s*<td[^>]*>\s*<div class="detail">([^<]+)/i,
-    ],
-    [
-      "dateManufactured",
-      /Date Manufactured:<\/div>\s*<\/td>\s*<td[^>]*>\s*<div class="detail">([^<]+)/i,
-    ],
+  // Find the Device section
+  const deviceSection = findSectionTable(root, "Device");
+
+  const fields = [
+    ["pipaReferenceNumber", "PIPA Reference Number:"],
+    ["tagNumber", "Tag Number:"],
+    ["type", "Type:"],
+    ["name", "Name:"],
+    ["manufacturer", "Manufacturer:"],
+    ["deviceSerialNumber", "Serial Number:"],
+    ["dateManufactured", "Date Manufactured:"],
   ];
 
-  for (const [key, pattern] of patterns) {
-    const match = html.match(pattern);
-    if (match) {
-      device[key] = match[1].trim();
-    }
+  // If we found the device section, search within it first
+  const searchRoot = deviceSection || root;
+
+  for (const [key, label] of fields) {
+    const value = findDetailByLabel(searchRoot, label);
+    if (value) device[key] = value;
   }
 
-  // Manual present - Pass/Fail
-  const manualMatch = html.match(
-    /manufacturer.*operation manual present\?:<\/div>[\s\S]*?badge--(\w+)">([^<]+)/i,
-  );
-  if (manualMatch) {
-    device.operationManualPresent = {
-      statusClass: manualMatch[1],
-      status: manualMatch[2].trim(),
-    };
-  }
+  // Manual present - Pass/Fail (search in device section)
+  const manualStatus = findBadgeByLabel(root, "operation manual present");
+  if (manualStatus) device.operationManualPresent = manualStatus;
 
   return device;
 };
 
 /**
- * Extract badge status from row HTML
- * @param {string} rowHtml - HTML for one table row
+ * Extract badge status from row element
+ * @param {HTMLElement} row - Table row element
  * @param {object} field - Field object to populate
  */
-const extractBadgeStatus = (rowHtml, field) => {
-  const badgeMatch = rowHtml.match(/badge badge--(\w+)"[^>]*>([^<]+)/);
-  if (badgeMatch) {
-    field.statusClass = badgeMatch[1];
-    field.status = badgeMatch[2].trim();
+const extractBadgeStatus = (row, field) => {
+  const badgeInfo = extractBadgeFromRow(row);
+  if (badgeInfo) {
+    field.statusClass = badgeInfo.statusClass;
+    field.status = badgeInfo.status;
   }
 };
 
 /**
- * Extract detail values from row HTML
- * @param {string} rowHtml - HTML for one table row
+ * Extract detail values from row element
+ * @param {HTMLElement} row - Table row element
  * @param {object} field - Field object to populate
  */
-const extractDetailValues = (rowHtml, field) => {
-  const detailMatches = rowHtml.matchAll(
-    /<div class="detail"[^>]*>([^<]*)<\/div>/g,
-  );
-  const details = [];
-  for (const m of detailMatches) {
-    const val = m[1].trim();
-    if (val) details.push(val);
+const extractDetailValues = (row, field) => {
+  const details = row.querySelectorAll(".detail");
+  const values = [];
+  for (const detail of details) {
+    const val = detail.text.trim();
+    if (val) values.push(val);
   }
-  if (details.length > 0) {
-    field.value = details.join(" ").trim();
+  if (values.length > 0) {
+    field.value = values.join(" ").trim();
   }
 };
 
 /**
- * Extract notes from row HTML
- * @param {string} rowHtml - HTML for one table row
+ * Extract notes from row element
+ * @param {HTMLElement} row - Table row element
  * @param {object} field - Field object to populate
  */
-const extractRowNotes = (rowHtml, field) => {
-  const notesMatch = rowHtml.match(/<div class="text">\s*([^<]+)/);
-  const notes = notesMatch?.[1]?.trim();
-  if (notes && notes !== "&nbsp;") {
+const extractRowNotes = (row, field) => {
+  const notesDiv = row.querySelector(".text");
+  if (!notesDiv) return;
+  const notes = notesDiv.text.trim();
+  if (notes && notes !== "&nbsp;" && notes !== "") {
     field.notes = notes;
   }
 };
 
 /**
- * Extract a single inspection field with optional status, value, and notes
- * @param {string} rowHtml - HTML for one table row
+ * Parse a single inspection row
+ * @param {HTMLElement} row - Table row element
  * @returns {object|null} Field data or null
  */
-const parseInspectionRow = (rowHtml) => {
-  const labelMatch = rowHtml.match(/<div class="label">([^<]+)<\/div>/);
-  if (!labelMatch) return null;
+const parseInspectionRow = (row) => {
+  const labelDiv = row.querySelector(".label");
+  if (!labelDiv) return null;
 
-  const field = { label: labelMatch[1].trim().replace(/:$/, "") };
-  extractBadgeStatus(rowHtml, field);
-  extractDetailValues(rowHtml, field);
-  extractRowNotes(rowHtml, field);
+  const field = { label: labelDiv.text.trim().replace(/:$/, "") };
+  extractBadgeStatus(row, field);
+  extractDetailValues(row, field);
+  extractRowNotes(row, field);
 
   return field;
 };
@@ -260,21 +322,31 @@ const sectionNameToKey = (name) =>
 const SKIP_SECTIONS = new Set(["Report Details", "Device"]);
 
 /**
- * Parse rows from a section body
- * @param {string} sectionBody - HTML content of section tbody
- * @returns {Array} Array of field objects
+ * Process a single section header and extract fields
+ * @param {HTMLElement} th - Section header element
+ * @returns {object|null} Section data or null
  */
-const parseSectionRows = (sectionBody) => {
-  const rowRegex = /<tr>\s*<td[^>]*>[\s\S]*?<div class="label">[\s\S]*?<\/tr>/g;
-  const rows = sectionBody.matchAll(rowRegex);
+const processSection = (th) => {
+  const sectionName = th.text.trim();
+  if (SKIP_SECTIONS.has(sectionName)) return null;
+
+  const table = th.closest("table");
+  if (!table) return null;
+
+  const tbody = table.querySelector("tbody");
+  if (!tbody) return null;
+
+  const rows = tbody.querySelectorAll("tr");
   const fields = [];
 
   for (const row of rows) {
-    const field = parseInspectionRow(row[0]);
+    const field = parseInspectionRow(row);
     if (field) fields.push(field);
   }
 
-  return fields;
+  if (fields.length === 0) return null;
+
+  return { key: sectionNameToKey(sectionName), fields };
 };
 
 /**
@@ -283,18 +355,13 @@ const parseSectionRows = (sectionBody) => {
  * @returns {object} Sections with their fields
  */
 export const extractInspectionSections = (html) => {
+  const root = parse(html);
   const sections = {};
-  const sectionRegex =
-    /<th colspan="4">([^<]+)<\/th>[\s\S]*?<\/thead>\s*<tbody>([\s\S]*?)<\/tbody>/g;
 
-  for (const match of html.matchAll(sectionRegex)) {
-    const sectionName = match[1].trim();
-    if (SKIP_SECTIONS.has(sectionName)) continue;
-
-    const fields = parseSectionRows(match[2]);
-    if (fields.length > 0) {
-      sections[sectionNameToKey(sectionName)] = fields;
-    }
+  const headers = root.querySelectorAll("th[colspan]");
+  for (const th of headers) {
+    const result = processSection(th);
+    if (result) sections[result.key] = result.fields;
   }
 
   return sections;
@@ -306,39 +373,28 @@ export const extractInspectionSections = (html) => {
  * @returns {object} User limits by height
  */
 export const extractUserLimits = (html) => {
+  const root = parse(html);
   const limits = {};
 
   const heightPatterns = [
-    [
-      "upTo1_0m",
-      /Max Number of Users of Height up to 1\.0m:<\/div>[\s\S]*?<div class="detail">(\d+)/i,
-    ],
-    [
-      "upTo1_2m",
-      /Max Number of Users of Height up to 1\.2m:<\/div>[\s\S]*?<div class="detail">(\d+)/i,
-    ],
-    [
-      "upTo1_5m",
-      /Max Number of Users of Height up to 1\.5m:<\/div>[\s\S]*?<div class="detail">(\d+)/i,
-    ],
-    [
-      "upTo1_8m",
-      /Max Number of Users of Height up to 1\.8m:<\/div>[\s\S]*?<div class="detail">(\d+)/i,
-    ],
+    ["upTo1_0m", "Max Number of Users of Height up to 1.0m:"],
+    ["upTo1_2m", "Max Number of Users of Height up to 1.2m:"],
+    ["upTo1_5m", "Max Number of Users of Height up to 1.5m:"],
+    ["upTo1_8m", "Max Number of Users of Height up to 1.8m:"],
   ];
 
-  for (const [key, pattern] of heightPatterns) {
-    const match = html.match(pattern);
-    if (match) {
-      limits[key] = Number.parseInt(match[1], 10);
+  for (const [key, label] of heightPatterns) {
+    const value = findDetailByLabel(root, label);
+    if (value) {
+      const num = Number.parseInt(value, 10);
+      if (!Number.isNaN(num)) {
+        limits[key] = num;
+      }
     }
   }
 
   // Custom max height
-  const customMatch = html.match(
-    /Custom Max User Height:<\/div>[\s\S]*?<div class="detail">([^<]+)/i,
-  );
-  const customValue = customMatch?.[1]?.trim();
+  const customValue = findDetailByLabel(root, "Custom Max User Height:");
   if (customValue) {
     limits.customMaxHeight = customValue;
   }
@@ -352,34 +408,22 @@ export const extractUserLimits = (html) => {
  * @returns {object} Notes
  */
 export const extractNotes = (html) => {
+  const root = parse(html);
   const notes = {};
 
-  const patterns = [
-    [
-      "additionalNotes",
-      /Additional Notes:<\/div>[\s\S]*?<div class="detail">([^<]+)/i,
-    ],
-    [
-      "riskAssessmentNotes",
-      /Risk Assessment Notes:<\/div>[\s\S]*?<div class="detail">([^<]+)/i,
-    ],
-    [
-      "repairsNeeded",
-      /Repairs needed to pass inspection:<\/div>[\s\S]*?<div class="detail">([^<]+)/i,
-    ],
-    [
-      "advisoryItems",
-      /Advisory items\s*:<\/div>[\s\S]*?<div class="detail">([^<]+)/i,
-    ],
+  const fields = [
+    ["additionalNotes", "Additional Notes:"],
+    ["riskAssessmentNotes", "Risk Assessment Notes:"],
+    ["repairsNeeded", "Repairs needed to pass inspection:"],
+    ["advisoryItems", "Advisory items"],
   ];
 
-  for (const [key, pattern] of patterns) {
-    const match = html.match(pattern);
-    if (match) {
-      const value = match[1].trim().replace(/&#xA;/g, "\n");
-      if (value) {
-        notes[key] = value;
-      }
+  for (const [key, label] of fields) {
+    const value = findDetailByLabel(root, label);
+    if (value) {
+      // Convert HTML entities for newlines
+      const processed = value.replace(/&#xA;/g, "\n");
+      notes[key] = processed;
     }
   }
 
@@ -392,19 +436,18 @@ export const extractNotes = (html) => {
  * @returns {object} Dimensions
  */
 export const extractDimensions = (html) => {
+  const root = parse(html);
   const dimensions = {};
 
-  const patterns = [
-    ["length", /Length:<\/div>[\s\S]*?<div class="detail">([^<]+)/i],
-    ["width", /Width:<\/div>[\s\S]*?<div class="detail">([^<]+)/i],
-    ["height", /Height:<\/div>[\s\S]*?<div class="detail">([^<]+)/i],
+  const fields = [
+    ["length", "Length:"],
+    ["width", "Width:"],
+    ["height", "Height:"],
   ];
 
-  for (const [key, pattern] of patterns) {
-    const match = html.match(pattern);
-    if (match) {
-      dimensions[key] = match[1].trim();
-    }
+  for (const [key, label] of fields) {
+    const value = findDetailByLabel(root, label);
+    if (value) dimensions[key] = value;
   }
 
   return dimensions;

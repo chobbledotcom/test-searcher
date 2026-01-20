@@ -488,6 +488,20 @@ describe("extractIntroFields", () => {
     const result = extractIntroFields("<html><body>Not a report</body></html>");
     expect(Object.keys(result).length).toBe(0);
   });
+
+  test("handles badge with invalid class format", () => {
+    const html = `
+      <table>
+        <tr>
+          <td><div class="label">Status:</div></td>
+          <td><div class="badge">Pass</div></td>
+        </tr>
+      </table>
+    `;
+    const result = extractIntroFields(html);
+    expect(result.status).toBeUndefined();
+    expect(result.statusClass).toBeUndefined();
+  });
 });
 
 describe("extractReportDetails", () => {
@@ -685,6 +699,26 @@ describe("extractInspectionSections", () => {
       "<html><body>Not a report</body></html>",
     );
     expect(Object.keys(result).length).toBe(0);
+  });
+
+  test("converts multi-word section names to camelCase", () => {
+    const html = `
+      <table class="table">
+        <thead>
+          <tr><th colspan="4">Area & surround</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><div class="label">Play Area m²:</div></td>
+            <td><div class="detail">25</div></td>
+            <td><div class="text"></div></td>
+          </tr>
+        </tbody>
+      </table>
+    `;
+    const result = extractInspectionSections(html);
+    expect(result.areaSurround).toBeDefined();
+    expect(result.areaSurround[0].label).toBe("Play Area m²");
   });
 });
 

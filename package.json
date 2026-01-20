@@ -21,5 +21,8 @@
   },
   "devDependencies": {
     "jscpd": "^4.0.5"
+  },
+  "dependencies": {
+    "node-html-parser": "^7.0.2"
   }
 }
