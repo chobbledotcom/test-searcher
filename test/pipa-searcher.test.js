@@ -263,6 +263,201 @@ describe("searchTagWithCache", () => {
     expect(result.fromCache).toBeUndefined();
     expect(result.found).toBe(false);
   });
+
+  test("fetches details when cache exists but has no details", async () => {
+    const sampleReportHtml = `
+      <h1>Inspection Report 123-v1</h1>
+      <div class="badge badge--green">Pass</div>
+    `;
+    const mockFetch = () =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Map([["content-type", "text/html"]]),
+        text: () => Promise.resolve(sampleReportHtml),
+      });
+
+    // Cache data without details
+    const data = {
+      found: true,
+      tagId: "12345",
+      status: "Pass",
+      annualReports: [
+        { url: "https://hub.pipa.org.uk/public/reports/report/abc" },
+      ],
+    };
+    await writeCache("12345", data, testCacheDir);
+
+    const result = await searchTagWithCache("12345", {
+      cacheDir: testCacheDir,
+      includeReportDetails: true,
+      fetcher: mockFetch,
+    });
+
+    expect(result.fromCache).toBe(false);
+    expect(result.annualReports[0].details).toBeDefined();
+    expect(result.annualReports[0].details.found).toBe(true);
+  });
+
+  test("returns cached data when details already present", async () => {
+    const data = {
+      found: true,
+      tagId: "12345",
+      status: "Pass",
+      annualReports: [
+        {
+          url: "https://hub.pipa.org.uk/public/reports/report/abc",
+          details: { found: true, reportId: "123" },
+        },
+      ],
+    };
+    await writeCache("12345", data, testCacheDir);
+
+    const result = await searchTagWithCache("12345", {
+      cacheDir: testCacheDir,
+      includeReportDetails: true,
+    });
+
+    expect(result.fromCache).toBe(true);
+    expect(result.annualReports[0].details.reportId).toBe("123");
+  });
+
+  test("returns cached data when no annual reports", async () => {
+    const data = {
+      found: true,
+      tagId: "12345",
+      status: "Pass",
+      annualReports: [],
+    };
+    await writeCache("12345", data, testCacheDir);
+
+    const result = await searchTagWithCache("12345", {
+      cacheDir: testCacheDir,
+      includeReportDetails: true,
+    });
+
+    expect(result.fromCache).toBe(true);
+    expect(result.annualReports).toHaveLength(0);
+  });
+
+  test("fetches fresh data with details when no cache", async () => {
+    const sampleTagHtml = `
+      <div class="check__image-tag check__image-tag--green">Pass</div>
+      <div class="check__details">
+        <div class="color--blue">Unit Reference No:</div>
+        <div class="color--dark-blue">12345</div>
+      </div>
+      <div class="y-spacer"></div>
+      <a class="report report--green" href="https://hub.pipa.org.uk/public/reports/report/abc" target="_blank">
+        <div class="report__date"><div class="report__value">01 Jan 2025</div></div>
+        <div class="report__number"><div class="report__value">999</div></div>
+        <div class="report__company"><div class="report__value">Test Co</div></div>
+        <div class="tag tag--small">Pass</div>
+      </a>
+    `;
+    const sampleReportHtml = `
+      <h1>Inspection Report 999-v1</h1>
+      <div class="badge badge--green">Pass</div>
+    `;
+
+    let callCount = 0;
+    const mockFetch = (url) => {
+      callCount += 1;
+      // First call: search API
+      if (callCount === 1) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({ success: "true", message: "/tags/12345/" }),
+        });
+      }
+      // Second call: tag page
+      if (callCount === 2) {
+        return Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve(sampleTagHtml),
+        });
+      }
+      // Third call: report details
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Map([["content-type", "text/html"]]),
+        text: () => Promise.resolve(sampleReportHtml),
+      });
+    };
+
+    const result = await searchTagWithCache("12345", {
+      cacheDir: testCacheDir,
+      includeReportDetails: true,
+      fetcher: mockFetch,
+    });
+
+    expect(result.found).toBe(true);
+    expect(result.annualReports).toHaveLength(1);
+    expect(result.annualReports[0].details).toBeDefined();
+    expect(result.annualReports[0].details.found).toBe(true);
+  });
+
+  test("does not cache when tag not found", async () => {
+    const mockFetch = () =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ success: "false" }),
+      });
+
+    const result = await searchTagWithCache("99999", {
+      cacheDir: testCacheDir,
+      fetcher: mockFetch,
+    });
+
+    expect(result.found).toBe(false);
+
+    // Verify nothing was cached
+    const cached = await readCache("99999", testCacheDir);
+    expect(cached).toBeNull();
+  });
+
+  test("fetches and caches fresh data without details", async () => {
+    const sampleTagHtml = `
+      <div class="check__image-tag check__image-tag--green">Pass</div>
+      <div class="check__details">
+        <div class="color--blue">Unit Reference No:</div>
+        <div class="color--dark-blue">12345</div>
+      </div>
+      <div class="y-spacer"></div>
+    `;
+
+    let callCount = 0;
+    const mockFetch = () => {
+      callCount += 1;
+      if (callCount === 1) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({ success: "true", message: "/tags/12345/" }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        text: () => Promise.resolve(sampleTagHtml),
+      });
+    };
+
+    const result = await searchTagWithCache("12345", {
+      cacheDir: testCacheDir,
+      includeReportDetails: false,
+      fetcher: mockFetch,
+    });
+
+    expect(result.found).toBe(true);
+    expect(result.unitReferenceNo).toBe("12345");
+
+    // Verify it was cached
+    const cached = await readCache("12345", testCacheDir);
+    expect(cached).not.toBeNull();
+    expect(cached.found).toBe(true);
+  });
 });
 
 describe("fetchReportDetails", () => {
