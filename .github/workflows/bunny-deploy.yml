@@ -17,5 +17,5 @@ jobs:
         uses: BunnyWay/actions/deploy-script@main
         with:
           script_id: ${{ vars.BUNNY_SCRIPT_ID }}
-          file: "bunny-script.js"
+          file: "bunny-script.ts"
           api_key: ${{ secrets.BUNNY_API_KEY }}
