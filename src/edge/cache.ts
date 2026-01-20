@@ -3,10 +3,7 @@
  * For use with Bunny Edge Script runtime
  */
 
-import {
-  type Client,
-  createClient,
-} from "https://esm.sh/@libsql/client@0.6.0/web";
+import { type Client, createClient } from "@libsql/client/web";
 import { CACHE_HOST, CACHE_TTL_MS } from "../lib/constants.ts";
 import type { CacheRow, TagResult } from "../lib/types.ts";
 

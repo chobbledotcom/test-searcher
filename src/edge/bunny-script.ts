@@ -3,7 +3,7 @@
  * Entry point for Bunny CDN edge deployment
  */
 
-import * as BunnySDK from "https://esm.sh/@bunny.net/edgescript-sdk@0.10.0";
+import * as BunnySDK from "@bunny.net/edgescript-sdk";
 import { fetchAllReportDetails } from "../lib/report-parser.ts";
 import { searchTag } from "../lib/tag-parser.ts";
 import type { TagResult } from "../lib/types.ts";

@@ -10,9 +10,9 @@ const result = await Bun.build({
   format: "esm",
   minify: false,
   external: [
-    "https://esm.sh/@bunny.net/edgescript-sdk@0.10.0",
-    "https://esm.sh/@libsql/client@0.6.0/web",
-    "https://esm.sh/node-html-parser@6.1.13",
+    "@bunny.net/edgescript-sdk",
+    "@libsql/client/web",
+    "node-html-parser",
   ],
 });
 
@@ -32,10 +32,15 @@ if (!outputPath) {
 
 const content = await Bun.file(outputPath).text();
 
+// Rewrite package imports to esm.sh URLs for edge runtime
 const finalContent = content
   .replace(
-    /from\s+["']\.\.\/lib\/constants\.ts["']/g,
-    'from "./lib/constants.ts"',
+    /from\s+["']@bunny\.net\/edgescript-sdk["']/g,
+    'from "https://esm.sh/@bunny.net/edgescript-sdk@0.10.0"',
+  )
+  .replace(
+    /from\s+["']@libsql\/client\/web["']/g,
+    'from "https://esm.sh/@libsql/client@0.6.0/web"',
   )
   .replace(
     /from\s+["']node-html-parser["']/g,

@@ -26,5 +26,5 @@
     "types": ["bun-types"]
   },
   "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts"],
-  "exclude": ["node_modules", "chobble-template", "src/edge/**/*.ts"]
+  "exclude": ["node_modules", "chobble-template"]
 }

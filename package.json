@@ -23,6 +23,8 @@
     "precommit": "bun run typecheck && bun run lint && bun run cpd && bun run test:coverage"
   },
   "devDependencies": {
+    "@bunny.net/edgescript-sdk": "^0.12.0",
+    "@libsql/client": "^0.17.0",
     "@types/bun": "^1.1.0",
     "jscpd": "^4.0.5",
     "typescript": "^5.8.0"
