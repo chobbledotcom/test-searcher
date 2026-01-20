@@ -1,0 +1,11 @@
+node_modules
+.jscpd-report
+coverage
+cache
+test
+*.md
+.git
+.gitignore
+.github
+Dockerfile
+.dockerignore
