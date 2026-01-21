@@ -31,6 +31,6 @@
   },
   "dependencies": {
     "node-html-parser": "^7.0.2",
-    "pdf-parse": "github:Dmrgn/pdf-parse"
+    "unpdf": "^0.12.1"
   }
 }

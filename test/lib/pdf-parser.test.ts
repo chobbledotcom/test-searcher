@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { parsePdfBuffer, parsePdfText } from "../../src/lib/pdf-parser.ts";
+import { searchTag } from "../../src/lib/tag-parser.ts";
 
 const samplePdfText = `Certificate of Inspection
 PIPA Device Reference Number: 40000 	| Tag Number: 40000 	| Report: 431119-v1
@@ -174,4 +175,38 @@ describe("parsePdfBuffer", () => {
     const invalidBuffer = new Uint8Array([0, 1, 2, 3]);
     await expect(parsePdfBuffer(invalidBuffer)).rejects.toThrow();
   });
+
+  test(
+    "parses real PDF from PIPA tag 40000",
+    async () => {
+      // First search for the tag to get the certificate URL
+      const tagResult = await searchTag("40000");
+      expect(tagResult.found).toBe(true);
+      expect(tagResult.certificateUrl).toBeDefined();
+
+      // Fetch the PDF
+      const pdfResponse = await fetch(tagResult.certificateUrl as string);
+      expect(pdfResponse.ok).toBe(true);
+      const pdfBuffer = await pdfResponse.arrayBuffer();
+
+      // Parse the PDF
+      const result = await parsePdfBuffer(pdfBuffer);
+
+      // Verify expected data for tag 40000
+      expect(result.found).toBe(true);
+      expect(result.isPdf).toBe(true);
+      expect(result.tagNo).toBe("40000");
+      expect(result.device?.pipaReferenceNumber).toBe("40000");
+      expect(result.device?.tagNumber).toBe("40000");
+      expect(result.device?.manufacturer).toBe("Airquee Ltd");
+      expect(result.device?.type).toBe("Bounce/Slide Combo");
+      expect(result.deviceType).toBe("Bounce/Slide Combo");
+      expect(result.inspectionBody).toBe("Andy J Leisure Ltd");
+      expect(result.reportDetails?.inspector).toBe("Matthew Hardwick");
+      expect(result.dimensions?.length).toBe("5.5m");
+      expect(result.dimensions?.width).toBe("3.9m");
+      expect(result.dimensions?.height).toBe("3m");
+    },
+    { timeout: 30000 },
+  );
 });
