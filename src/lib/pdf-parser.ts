@@ -51,10 +51,21 @@ const getStatusClass = (status: string | null | undefined): string => {
 
 /**
  * Extract report identification from normalized text
+ * Handles multiple formats:
+ * - "Report: 431119-v1" (new certificate format)
+ * - "Inspection Report ID: 431119-v1" (new certificate format)
+ * - "PIPA Report #74356" (old continuation sheet format)
  */
 const extractReportId = (text: string): string | null | undefined =>
   extractValue(text, /Report:\s*(\S+)/) ??
-  extractValue(text, /Inspection Report ID:\s*(\S+)/);
+  extractValue(text, /Inspection Report ID:\s*(\S+)/) ??
+  extractValue(text, /PIPA Report #(\d+)/);
+
+/**
+ * Check if the PDF text indicates a continuation sheet (notes only)
+ */
+const isContinuationSheet = (text: string): boolean =>
+  text.includes("Continuation Sheet") && !text.includes("Certificate");
 
 /**
  * Extract tag/reference numbers from normalized text
@@ -179,14 +190,38 @@ const buildReportDetails = (
 };
 
 /**
- * Parse PDF text content into ReportDetails
+ * Build result for image-only PDFs (no text layer)
  */
-export const parsePdfText = (text: string): ReportDetails => {
-  if (!text || text.length === 0) {
-    return { found: false, error: "Empty PDF text content" };
-  }
+const buildImageOnlyResult = (): ReportDetails => ({
+  found: true,
+  isPdf: true,
+  isImageOnly: true,
+  statusClass: "unknown",
+  error: "PDF contains only images (no text layer) - requires OCR",
+  fetchedAt: new Date().toISOString(),
+});
 
-  const normalizedText = text.replace(/\s+/g, " ");
+/**
+ * Build result for continuation sheet PDFs (old format)
+ */
+const buildContinuationSheetResult = (
+  reportId: string | null | undefined,
+): ReportDetails => ({
+  found: true,
+  isPdf: true,
+  isContinuationSheet: true,
+  reportId: reportId ?? undefined,
+  id: reportId ?? undefined,
+  statusClass: "unknown",
+  error:
+    "PDF is a continuation sheet (notes only) - main certificate is image-based",
+  fetchedAt: new Date().toISOString(),
+});
+
+/**
+ * Build full certificate result from normalized text
+ */
+const buildCertificateResult = (normalizedText: string): ReportDetails => {
   const reportId = extractReportId(normalizedText);
   const tagInfo = extractTagInfo(normalizedText);
   const { status, statusClass } = extractStatus(normalizedText);
@@ -217,6 +252,23 @@ export const parsePdfText = (text: string): ReportDetails => {
     dimensions: Object.keys(dimensions).length > 0 ? dimensions : undefined,
     fetchedAt: new Date().toISOString(),
   };
+};
+
+/**
+ * Parse PDF text content into ReportDetails
+ */
+export const parsePdfText = (text: string): ReportDetails => {
+  if (!text || text.length === 0) {
+    return buildImageOnlyResult();
+  }
+
+  const normalizedText = text.replace(/\s+/g, " ");
+
+  if (isContinuationSheet(normalizedText)) {
+    return buildContinuationSheetResult(extractReportId(normalizedText));
+  }
+
+  return buildCertificateResult(normalizedText);
 };
 
 /**

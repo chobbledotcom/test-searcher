@@ -36,6 +36,10 @@ export interface ReportDetails {
   fetchedAt?: string;
   error?: string;
   isPdf?: boolean;
+  /** True if PDF contains only images (no text layer) - requires OCR */
+  isImageOnly?: boolean;
+  /** True if PDF is a continuation sheet (notes only, main certificate is image-based) */
+  isContinuationSheet?: boolean;
 }
 
 export interface InspectionField {

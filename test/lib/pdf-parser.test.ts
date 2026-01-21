@@ -106,10 +106,31 @@ describe("parsePdfText", () => {
     expect(new Date(result.fetchedAt as string).getTime()).toBeGreaterThan(0);
   });
 
-  test("returns not found for empty text", () => {
+  test("handles empty text as image-only PDF", () => {
     const result = parsePdfText("");
-    expect(result.found).toBe(false);
-    expect(result.error).toBe("Empty PDF text content");
+    expect(result.found).toBe(true);
+    expect(result.isPdf).toBe(true);
+    expect(result.isImageOnly).toBe(true);
+    expect(result.statusClass).toBe("unknown");
+    expect(result.error).toContain("requires OCR");
+  });
+
+  test("handles continuation sheet format", () => {
+    const continuationText =
+      "Continuation Sheet Notes for PIPA Report #74356 Notes BLOWER NOT PAT TESTED BY ME";
+    const result = parsePdfText(continuationText);
+    expect(result.found).toBe(true);
+    expect(result.isPdf).toBe(true);
+    expect(result.isContinuationSheet).toBe(true);
+    expect(result.reportId).toBe("74356");
+    expect(result.statusClass).toBe("unknown");
+    expect(result.error).toContain("continuation sheet");
+  });
+
+  test("extracts report ID from PIPA Report # format", () => {
+    const text = "PIPA Report #12345 some other text";
+    const result = parsePdfText(text);
+    expect(result.reportId).toBe("12345");
   });
 
   test("handles Fail status with red class", () => {
