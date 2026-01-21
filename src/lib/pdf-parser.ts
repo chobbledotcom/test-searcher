@@ -3,7 +3,6 @@
  * Parses PIPA inspection certificate PDFs from hub.pipa.org.uk
  */
 
-import { PDFParse } from "pdf-parse";
 import type { ReportDetails } from "./types.ts";
 
 /**
@@ -222,10 +221,12 @@ export const parsePdfText = (text: string): ReportDetails => {
 
 /**
  * Parse a PDF buffer into ReportDetails
+ * Uses dynamic import to avoid loading pdf-parse at startup
  */
 export const parsePdfBuffer = async (
   buffer: ArrayBuffer | Uint8Array,
 ): Promise<ReportDetails> => {
+  const { PDFParse } = await import("pdf-parse");
   const data = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
   const parser = new PDFParse({ data });
   const result = await parser.getText();

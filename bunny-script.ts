@@ -1,3 +1,27 @@
+var __create = Object.create;
+var __getProtoOf = Object.getPrototypeOf;
+var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __toESM = (mod, isNodeMode, target) => {
+  target = mod != null ? __create(__getProtoOf(mod)) : {};
+  const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
+  for (let key of __getOwnPropNames(mod))
+    if (!__hasOwnProp.call(to, key))
+      __defProp(to, key, {
+        get: () => mod[key],
+        enumerable: true
+      });
+  return to;
+};
+var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
+  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
+}) : x)(function(x) {
+  if (typeof require !== "undefined")
+    return require.apply(this, arguments);
+  throw Error('Dynamic require of "' + x + '" is not supported');
+});
+
 // src/edge/bunny-script.ts
 import * as BunnySDK from "https://esm.sh/@bunny.net/edgescript-sdk@0.10.0";
 
@@ -12,7 +36,6 @@ var CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 var CACHE_HOST = "pipa.org.uk";
 
 // src/lib/pdf-parser.ts
-import { PDFParse } from "https://esm.sh/pdf-parse@2.4.5";
 var extractValue = (text, pattern) => {
   const match = text.match(pattern);
   return match?.[1]?.trim();
@@ -131,6 +154,7 @@ var parsePdfText = (text) => {
   };
 };
 var parsePdfBuffer = async (buffer) => {
+  const { PDFParse } = await import("pdf-parse");
   const data = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
   const parser = new PDFParse({ data });
   const result = await parser.getText();
