@@ -12,6 +12,7 @@ const result = await Bun.build({
   external: [
     "@bunny.net/edgescript-sdk",
     "@libsql/client/web",
+    "@thednp/dommatrix",
     "node-html-parser",
     "pdf-parse",
   ],
@@ -42,6 +43,10 @@ const finalContent = content
   .replace(
     /from\s+["']@libsql\/client\/web["']/g,
     'from "https://esm.sh/@libsql/client@0.6.0/web"',
+  )
+  .replace(
+    /from\s+["']@thednp\/dommatrix["']/g,
+    'from "https://esm.sh/@thednp/dommatrix@3.0.2"',
   )
   .replace(
     /from\s+["']node-html-parser["']/g,

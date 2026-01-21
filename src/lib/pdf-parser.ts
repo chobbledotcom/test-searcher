@@ -31,14 +31,14 @@ const parseDimensions = (
   const match = dimStr.match(
     /(\d+(?:\.\d+)?m?)\s*x\s*(\d+(?:\.\d+)?m?)\s*x\s*(\d+(?:\.\d+)?m?)/i,
   );
-  if (!match?.[1] || !match[2] || !match[3]) return {};
+  if (!match?.[1] || !match?.[2] || !match?.[3]) return {};
   const length = match[1];
   const width = match[2];
   const height = match[3];
   return {
-    length: length.includes("m") ? length : `${length}m`,
-    width: width.includes("m") ? width : `${width}m`,
-    height: height.includes("m") ? height : `${height}m`,
+    length: length?.includes("m") ? length : `${length}m`,
+    width: width?.includes("m") ? width : `${width}m`,
+    height: height?.includes("m") ? height : `${height}m`,
   };
 };
 
