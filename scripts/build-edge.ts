@@ -13,6 +13,7 @@ const result = await Bun.build({
     "@bunny.net/edgescript-sdk",
     "@libsql/client/web",
     "node-html-parser",
+    "pdf-parse",
   ],
 });
 
@@ -45,6 +46,10 @@ const finalContent = content
   .replace(
     /from\s+["']node-html-parser["']/g,
     'from "https://esm.sh/node-html-parser@6.1.13"',
+  )
+  .replace(
+    /from\s+["']pdf-parse["']/g,
+    'from "https://esm.sh/pdf-parse@2.4.5"',
   );
 
 await Bun.write("./bunny-script.ts", finalContent);

@@ -428,9 +428,8 @@ describe("fetchReport", () => {
     expect(result.error).toBe("Report fetch error: 404");
   });
 
-  test("attempts to parse PDF content type", async () => {
-    // When PDF content is detected, it attempts to parse it
-    // This test verifies the PDF parsing path is triggered
+  test("handles PDF parsing errors gracefully", async () => {
+    // When PDF content is detected but parsing fails, return error response
     const mockFetch = () =>
       Promise.resolve({
         ok: true,
@@ -439,13 +438,14 @@ describe("fetchReport", () => {
         arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
       });
 
-    // Empty buffer will cause PDF parsing to fail, but it proves
-    // the PDF path was taken (not the HTML path)
-    await expect(
-      fetchReport("https://hub.pipa.org.uk/public/reports/report/abc", {
-        fetcher: mockFetch as unknown as typeof fetch,
-      }),
-    ).rejects.toThrow();
+    const result = await fetchReport(
+      "https://hub.pipa.org.uk/public/reports/report/abc",
+      { fetcher: mockFetch as unknown as typeof fetch },
+    );
+
+    expect(result.found).toBe(false);
+    expect(result.isPdf).toBe(true);
+    expect(result.error).toContain("PDF parsing failed");
   });
 
   test("parses valid HTML response", async () => {

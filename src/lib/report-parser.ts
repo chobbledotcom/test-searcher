@@ -517,8 +517,16 @@ export const fetchReport = async (
 
   // Handle PDF content - parse it instead of erroring
   if (isPdfContent(response)) {
-    const buffer = await response.arrayBuffer();
-    return parsePdfBuffer(buffer);
+    try {
+      const buffer = await response.arrayBuffer();
+      return await parsePdfBuffer(buffer);
+    } catch (error) {
+      return {
+        found: false,
+        isPdf: true,
+        error: `PDF parsing failed: ${String(error)}`,
+      };
+    }
   }
 
   const html = await response.text();
