@@ -30,8 +30,7 @@
     "typescript": "^5.8.0"
   },
   "dependencies": {
-    "@thednp/dommatrix": "^3.0.2",
     "node-html-parser": "^7.0.2",
-    "pdf-parse": "^2.4.5"
+    "pdf-parse": "github:Dmrgn/pdf-parse"
   }
 }

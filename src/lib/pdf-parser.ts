@@ -3,11 +3,7 @@
  * Parses PIPA inspection certificate PDFs from hub.pipa.org.uk
  */
 
-import { installDOMMatrixPolyfill } from "./dommatrix-polyfill.ts";
 import type { ReportDetails } from "./types.ts";
-
-// Install DOMMatrix polyfill for environments that don't have it
-installDOMMatrixPolyfill();
 
 /**
  * Extract a single value from text using a pattern
@@ -230,9 +226,8 @@ export const parsePdfText = (text: string): ReportDetails => {
 export const parsePdfBuffer = async (
   buffer: ArrayBuffer | Uint8Array,
 ): Promise<ReportDetails> => {
-  const { PDFParse } = await import("pdf-parse");
-  const data = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
-  const parser = new PDFParse({ data });
-  const result = await parser.getText();
+  const pdf = (await import("pdf-parse")).default;
+  const data = buffer instanceof Uint8Array ? buffer : Buffer.from(buffer);
+  const result = await pdf(data);
   return parsePdfText(result.text);
 };
