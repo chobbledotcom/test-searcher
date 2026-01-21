@@ -221,13 +221,14 @@ export const parsePdfText = (text: string): ReportDetails => {
 
 /**
  * Parse a PDF buffer into ReportDetails
- * Uses dynamic import to avoid loading pdf-parse at startup
+ * Uses unpdf for PDF parsing
  */
 export const parsePdfBuffer = async (
   buffer: ArrayBuffer | Uint8Array,
 ): Promise<ReportDetails> => {
-  const pdf = (await import("pdf-parse")).default;
-  const data = buffer instanceof Uint8Array ? buffer : Buffer.from(buffer);
-  const result = await pdf(data);
-  return parsePdfText(result.text);
+  const { extractText, getDocumentProxy } = await import("unpdf");
+  const data = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  const pdf = await getDocumentProxy(data);
+  const { text } = await extractText(pdf, { mergePages: true });
+  return parsePdfText(text);
 };
