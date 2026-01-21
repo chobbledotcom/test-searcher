@@ -35,7 +35,16 @@ var USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (
 var CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 var CACHE_HOST = "pipa.org.uk";
 
+// src/lib/dommatrix-polyfill.ts
+import CSSMatrix from "https://esm.sh/@thednp/dommatrix@3.0.2";
+var installDOMMatrixPolyfill = () => {
+  if (typeof globalThis.DOMMatrix === "undefined") {
+    globalThis.DOMMatrix = CSSMatrix;
+  }
+};
+
 // src/lib/pdf-parser.ts
+installDOMMatrixPolyfill();
 var extractValue = (text, pattern) => {
   const match = text.match(pattern);
   return match?.[1]?.trim();
@@ -44,15 +53,15 @@ var parseDimensions = (dimStr) => {
   if (!dimStr)
     return {};
   const match = dimStr.match(/(\d+(?:\.\d+)?m?)\s*x\s*(\d+(?:\.\d+)?m?)\s*x\s*(\d+(?:\.\d+)?m?)/i);
-  if (!match?.[1] || !match[2] || !match[3])
+  if (!match?.[1] || !match?.[2] || !match?.[3])
     return {};
   const length = match[1];
   const width = match[2];
   const height = match[3];
   return {
-    length: length.includes("m") ? length : `${length}m`,
-    width: width.includes("m") ? width : `${width}m`,
-    height: height.includes("m") ? height : `${height}m`
+    length: length?.includes("m") ? length : `${length}m`,
+    width: width?.includes("m") ? width : `${width}m`,
+    height: height?.includes("m") ? height : `${height}m`
   };
 };
 var getStatusClass = (status) => {
