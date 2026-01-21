@@ -3,7 +3,11 @@
  * Parses PIPA inspection certificate PDFs from hub.pipa.org.uk
  */
 
+import { installDOMMatrixPolyfill } from "./dommatrix-polyfill.ts";
 import type { ReportDetails } from "./types.ts";
+
+// Install DOMMatrix polyfill for environments that don't have it
+installDOMMatrixPolyfill();
 
 /**
  * Extract a single value from text using a pattern
