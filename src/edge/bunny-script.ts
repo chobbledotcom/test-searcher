@@ -9,6 +9,9 @@ import { searchTag } from "../lib/tag-parser.ts";
 import type { TagResult } from "../lib/types.ts";
 import { initCache, readCache, writeCache } from "./cache.ts";
 
+// biome-ignore lint/suspicious/noConsole: Edge script logging for debugging
+console.log("[PIPA] Edge script module loaded");
+
 /**
  * Handle cache hit - fetch missing details if needed
  */
@@ -207,10 +210,29 @@ const handleRequest = async (request: Request): Promise<Response> => {
 
 let initialized = false;
 
+// biome-ignore lint/suspicious/noConsole: Edge script logging for debugging
+console.log("[PIPA] Registering HTTP handler...");
+
 BunnySDK.net.http.serve(async (request: Request): Promise<Response> => {
-  if (!initialized) {
-    await initCache();
-    initialized = true;
+  try {
+    if (!initialized) {
+      // biome-ignore lint/suspicious/noConsole: Edge script logging for debugging
+      console.log("[PIPA] Initializing cache...");
+      await initCache();
+      initialized = true;
+      // biome-ignore lint/suspicious/noConsole: Edge script logging for debugging
+      console.log("[PIPA] Cache initialized successfully");
+    }
+    return handleRequest(request);
+  } catch (error) {
+    // biome-ignore lint/suspicious/noConsole: Edge script error logging
+    console.error("[PIPA] Request error:", error);
+    return jsonResponse(
+      { error: "Internal server error", message: String(error) },
+      500,
+    );
   }
-  return handleRequest(request);
 });
+
+// biome-ignore lint/suspicious/noConsole: Edge script logging for debugging
+console.log("[PIPA] HTTP handler registered");

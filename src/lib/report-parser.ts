@@ -5,6 +5,7 @@
 
 import { type HTMLElement, parse } from "node-html-parser";
 import { USER_AGENT } from "./constants.ts";
+import { parsePdfBuffer } from "./pdf-parser.ts";
 import type {
   AnnualReport,
   BadgeStatus,
@@ -485,12 +486,9 @@ const checkForRedirect = (response: Response): ReportDetails | null => {
 /**
  * Check if response is PDF content type
  */
-const checkForPdfContent = (response: Response): ReportDetails | null => {
+const isPdfContent = (response: Response): boolean => {
   const contentType = response.headers.get("content-type") ?? "";
-  if (contentType.includes("application/pdf")) {
-    return { found: false, isPdf: true, error: "Report is a PDF, not HTML" };
-  }
-  return null;
+  return contentType.includes("application/pdf");
 };
 
 /**
@@ -517,8 +515,19 @@ export const fetchReport = async (
     return { found: false, error: `Report fetch error: ${response.status}` };
   }
 
-  const pdfResult = checkForPdfContent(response);
-  if (pdfResult) return pdfResult;
+  // Handle PDF content - parse it instead of erroring
+  if (isPdfContent(response)) {
+    try {
+      const buffer = await response.arrayBuffer();
+      return await parsePdfBuffer(buffer);
+    } catch (error) {
+      return {
+        found: false,
+        isPdf: true,
+        error: `PDF parsing failed: ${String(error)}`,
+      };
+    }
+  }
 
   const html = await response.text();
   return parseReportPage(html);

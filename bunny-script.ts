@@ -11,6 +11,132 @@ var USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (
 var CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 var CACHE_HOST = "pipa.org.uk";
 
+// src/lib/pdf-parser.ts
+import { PDFParse } from "https://esm.sh/pdf-parse@2.4.5";
+var extractValue = (text, pattern) => {
+  const match = text.match(pattern);
+  return match?.[1]?.trim();
+};
+var parseDimensions = (dimStr) => {
+  if (!dimStr)
+    return {};
+  const match = dimStr.match(/(\d+(?:\.\d+)?m?)\s*x\s*(\d+(?:\.\d+)?m?)\s*x\s*(\d+(?:\.\d+)?m?)/i);
+  if (!match?.[1] || !match[2] || !match[3])
+    return {};
+  const length = match[1];
+  const width = match[2];
+  const height = match[3];
+  return {
+    length: length.includes("m") ? length : `${length}m`,
+    width: width.includes("m") ? width : `${width}m`,
+    height: height.includes("m") ? height : `${height}m`
+  };
+};
+var getStatusClass = (status) => {
+  if (!status)
+    return "unknown";
+  const statusLower = status.toLowerCase();
+  if (statusLower.includes("pass"))
+    return "green";
+  if (statusLower.includes("fail"))
+    return "red";
+  return "yellow";
+};
+var extractReportId = (text) => extractValue(text, /Report:\s*(\S+)/) ?? extractValue(text, /Inspection Report ID:\s*(\S+)/);
+var extractTagInfo = (text) => {
+  const pipaReferenceNumber = extractValue(text, /PIPA Device Reference Number:\s*(\d+)/);
+  const tagNumber = extractValue(text, /Tag Number:\s*(\d+)/) ?? pipaReferenceNumber;
+  return {
+    pipaReferenceNumber: pipaReferenceNumber ?? undefined,
+    tagNumber: tagNumber ?? undefined
+  };
+};
+var extractStatus = (text) => {
+  const statusMatch = text.match(/\b(Pass|Fail)\b\s+Inspection Valid From/i);
+  const status = statusMatch?.[1] ?? null;
+  return {
+    status: status ?? undefined,
+    statusClass: getStatusClass(status)
+  };
+};
+var extractDates = (text) => ({
+  validFrom: extractValue(text, /Inspection Valid From:\s*(\d{1,2}\s+\w+\s+\d{4})/) ?? undefined,
+  expiryDate: extractValue(text, /Expiry Date:\s*(\d{1,2}\s+\w+\s+\d{4})/) ?? undefined
+});
+var extractInspectorInfo = (text) => ({
+  inspector: extractValue(text, /Inspector Name:\s*([^\n]+?)(?=\s+Inspection Body:|$)/) ?? undefined,
+  inspectionBody: extractValue(text, /Inspection Body:\s*([^\n]+?)(?=\s+Inspection Report ID:|$)/) ?? undefined
+});
+var extractDeviceDetails = (text) => ({
+  manufacturer: extractValue(text, /Manufacturer:\s*([^\n]+?)(?=\s+Device Type:|$)/) ?? undefined,
+  type: extractValue(text, /Device Type:\s*([^\n]+?)(?=\s+Manufactured Date:|$)/) ?? undefined,
+  dateManufactured: extractValue(text, /Manufactured Date:\s*([^\n]+?)(?=\s+Device Description:|$)/) ?? undefined
+});
+var extractIndoorUseOnly = (text) => {
+  const match = text.match(/Tested for Indoor Use Only\??\s*(Yes|No)/i);
+  return match?.[1] ?? undefined;
+};
+var buildDeviceObject = (tagInfo, deviceDetails) => {
+  const device = {};
+  if (tagInfo.pipaReferenceNumber)
+    device.pipaReferenceNumber = tagInfo.pipaReferenceNumber;
+  if (tagInfo.tagNumber)
+    device.tagNumber = tagInfo.tagNumber;
+  if (deviceDetails.type)
+    device.type = deviceDetails.type;
+  if (deviceDetails.manufacturer)
+    device.manufacturer = deviceDetails.manufacturer;
+  if (deviceDetails.dateManufactured)
+    device.dateManufactured = deviceDetails.dateManufactured;
+  return Object.keys(device).length > 0 ? device : undefined;
+};
+var buildReportDetails = (inspector, indoorUseOnly) => {
+  const reportDetails = {};
+  if (inspector)
+    reportDetails.inspector = inspector;
+  if (indoorUseOnly)
+    reportDetails.indoorUseOnly = indoorUseOnly;
+  return Object.keys(reportDetails).length > 0 ? reportDetails : undefined;
+};
+var parsePdfText = (text) => {
+  if (!text || text.length === 0) {
+    return { found: false, error: "Empty PDF text content" };
+  }
+  const normalizedText = text.replace(/\s+/g, " ");
+  const reportId = extractReportId(normalizedText);
+  const tagInfo = extractTagInfo(normalizedText);
+  const { status, statusClass } = extractStatus(normalizedText);
+  const { validFrom, expiryDate } = extractDates(normalizedText);
+  const { inspector, inspectionBody } = extractInspectorInfo(normalizedText);
+  const deviceDetails = extractDeviceDetails(normalizedText);
+  const indoorUseOnly = extractIndoorUseOnly(normalizedText);
+  const dimensionsStr = extractValue(normalizedText, /Dimensions[^:]*:\s*([^\n]+?)(?=\s+Tested for Indoor|$)/);
+  const dimensions = parseDimensions(dimensionsStr);
+  return {
+    found: true,
+    isPdf: true,
+    reportId: reportId ?? undefined,
+    id: reportId ?? undefined,
+    validFrom,
+    expiryDate,
+    inspectionBody,
+    tagNo: tagInfo.tagNumber,
+    deviceType: deviceDetails.type,
+    statusClass,
+    status,
+    reportDetails: buildReportDetails(inspector, indoorUseOnly),
+    device: buildDeviceObject(tagInfo, deviceDetails),
+    dimensions: Object.keys(dimensions).length > 0 ? dimensions : undefined,
+    fetchedAt: new Date().toISOString()
+  };
+};
+var parsePdfBuffer = async (buffer) => {
+  const data = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  const parser = new PDFParse({ data });
+  const result = await parser.getText();
+  return parsePdfText(result.text);
+};
+
 // src/lib/report-parser.ts
 var getDetailFromLabelRow = (label) => {
   const row = label.closest("tr");
@@ -70,7 +196,7 @@ var findBadgeByLabel = (root, labelText) => {
   }
   return null;
 };
-var extractReportId = (root) => {
+var extractReportId2 = (root) => {
   const h1 = root.querySelector("h1");
   if (!h1)
     return null;
@@ -101,7 +227,7 @@ var extractImageUrl = (root) => {
 var extractIntroFields = (html) => {
   const root = parse(html);
   const intro = {};
-  const reportId = extractReportId(root);
+  const reportId = extractReportId2(root);
   if (reportId)
     intro.reportId = reportId;
   const introFields = [
@@ -328,12 +454,9 @@ var checkForRedirect = (response) => {
   }
   return null;
 };
-var checkForPdfContent = (response) => {
+var isPdfContent = (response) => {
   const contentType = response.headers.get("content-type") ?? "";
-  if (contentType.includes("application/pdf")) {
-    return { found: false, isPdf: true, error: "Report is a PDF, not HTML" };
-  }
-  return null;
+  return contentType.includes("application/pdf");
 };
 var fetchReport = async (reportUrl, options = {}) => {
   if (!isValidReportUrl(reportUrl)) {
@@ -350,9 +473,18 @@ var fetchReport = async (reportUrl, options = {}) => {
   if (!response.ok) {
     return { found: false, error: `Report fetch error: ${response.status}` };
   }
-  const pdfResult = checkForPdfContent(response);
-  if (pdfResult)
-    return pdfResult;
+  if (isPdfContent(response)) {
+    try {
+      const buffer = await response.arrayBuffer();
+      return await parsePdfBuffer(buffer);
+    } catch (error) {
+      return {
+        found: false,
+        isPdf: true,
+        error: `PDF parsing failed: ${String(error)}`
+      };
+    }
+  }
   const html = await response.text();
   return parseReportPage(html);
 };
@@ -536,6 +668,7 @@ var writeCache = async (tagId, data) => {
 };
 
 // src/edge/bunny-script.ts
+console.log("[PIPA] Edge script module loaded");
 var handleCacheHit = async (cached, tagId) => {
   const hasDetails = cached.annualReports?.[0]?.details;
   const needsDetails = cached.annualReports?.length && !hasDetails;
@@ -699,10 +832,19 @@ var handleRequest = async (request) => {
   return jsonResponse({ error: "Not found" }, 404);
 };
 var initialized = false;
+console.log("[PIPA] Registering HTTP handler...");
 BunnySDK.net.http.serve(async (request) => {
-  if (!initialized) {
-    await initCache();
-    initialized = true;
+  try {
+    if (!initialized) {
+      console.log("[PIPA] Initializing cache...");
+      await initCache();
+      initialized = true;
+      console.log("[PIPA] Cache initialized successfully");
+    }
+    return handleRequest(request);
+  } catch (error) {
+    console.error("[PIPA] Request error:", error);
+    return jsonResponse({ error: "Internal server error", message: String(error) }, 500);
   }
-  return handleRequest(request);
 });
+console.log("[PIPA] HTTP handler registered");

@@ -428,12 +428,14 @@ describe("fetchReport", () => {
     expect(result.error).toBe("Report fetch error: 404");
   });
 
-  test("handles PDF content type", async () => {
+  test("handles PDF parsing errors gracefully", async () => {
+    // When PDF content is detected but parsing fails, return error response
     const mockFetch = () =>
       Promise.resolve({
         ok: true,
         status: 200,
         headers: new Map([["content-type", "application/pdf"]]),
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
       });
 
     const result = await fetchReport(
@@ -443,6 +445,7 @@ describe("fetchReport", () => {
 
     expect(result.found).toBe(false);
     expect(result.isPdf).toBe(true);
+    expect(result.error).toContain("PDF parsing failed");
   });
 
   test("parses valid HTML response", async () => {
