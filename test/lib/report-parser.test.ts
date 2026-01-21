@@ -391,25 +391,37 @@ describe("fetchReport", () => {
     expect(result.error).toBe("Invalid report URL");
   });
 
-  test("handles redirect as PDF", async () => {
-    const mockFetch = () =>
-      Promise.resolve({
-        status: 301,
-        headers: new Map([
-          ["location", "https://hub.pipa.org.uk/download/file.pdf"],
-        ]),
+  test("follows redirect and parses PDF", async () => {
+    let callCount = 0;
+    const mockFetch = (url: string) => {
+      callCount++;
+      if (callCount === 1) {
+        // First call - return redirect
+        return Promise.resolve({
+          status: 301,
+          headers: new Map([
+            ["location", "https://hub.pipa.org.uk/download/file.pdf"],
+          ]),
+        });
+      }
+      // Second call - return PDF content (empty buffer triggers parse error)
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Map([["content-type", "application/pdf"]]),
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
       });
+    };
 
     const result = await fetchReport(
       "https://hub.pipa.org.uk/public/reports/report/abc",
       { fetcher: mockFetch as unknown as typeof fetch },
     );
 
-    expect(result.found).toBe(false);
+    expect(callCount).toBe(2);
+    // With empty PDF buffer, parsing fails but redirect was followed
     expect(result.isPdf).toBe(true);
-    expect(result.redirectUrl).toBe(
-      "https://hub.pipa.org.uk/download/file.pdf",
-    );
+    expect(result.error).toContain("PDF parsing failed");
   });
 
   test("handles HTTP error", async () => {

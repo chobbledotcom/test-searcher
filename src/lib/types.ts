@@ -36,7 +36,6 @@ export interface ReportDetails {
   fetchedAt?: string;
   error?: string;
   isPdf?: boolean;
-  redirectUrl?: string;
 }
 
 export interface InspectionField {

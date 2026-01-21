@@ -470,15 +470,11 @@ const isValidReportUrl = (url: string | null | undefined): boolean =>
 
 /**
  * Check if response is a redirect (likely PDF download)
+ * Returns the redirect URL if found, null otherwise
  */
-const checkForRedirect = (response: Response): ReportDetails | null => {
+const getRedirectUrl = (response: Response): string | null => {
   if (response.status >= 300 && response.status < 400) {
-    return {
-      found: false,
-      isPdf: true,
-      redirectUrl: response.headers.get("location") ?? undefined,
-      error: "Report is a PDF download, not an HTML page",
-    };
+    return response.headers.get("location");
   }
   return null;
 };
@@ -503,13 +499,18 @@ export const fetchReport = async (
   }
 
   const fetcher = options.fetcher ?? fetch;
-  const response = await fetcher(reportUrl as string, {
+  let response = await fetcher(reportUrl as string, {
     headers: { "User-Agent": USER_AGENT },
     redirect: "manual",
   });
 
-  const redirectResult = checkForRedirect(response);
-  if (redirectResult) return redirectResult;
+  // Follow redirect to PDF if present
+  const redirectUrl = getRedirectUrl(response);
+  if (redirectUrl) {
+    response = await fetcher(redirectUrl, {
+      headers: { "User-Agent": USER_AGENT },
+    });
+  }
 
   if (!response.ok) {
     return { found: false, error: `Report fetch error: ${response.status}` };
