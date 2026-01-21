@@ -47,9 +47,11 @@ const finalContent = content
     /from\s+["']node-html-parser["']/g,
     'from "https://esm.sh/node-html-parser@6.1.13"',
   )
+  .replace(/from\s+["']pdf-parse["']/g, 'from "https://esm.sh/pdf-parse@2.4.5"')
+  // Also rewrite dynamic imports for pdf-parse
   .replace(
-    /from\s+["']pdf-parse["']/g,
-    'from "https://esm.sh/pdf-parse@2.4.5"',
+    /import\s*\(\s*["']pdf-parse["']\s*\)/g,
+    'import("https://esm.sh/pdf-parse@2.4.5")',
   );
 
 await Bun.write("./bunny-script.ts", finalContent);

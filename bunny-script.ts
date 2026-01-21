@@ -154,7 +154,7 @@ var parsePdfText = (text) => {
   };
 };
 var parsePdfBuffer = async (buffer) => {
-  const { PDFParse } = await import("pdf-parse");
+  const { PDFParse } = await import("https://esm.sh/pdf-parse@2.4.5");
   const data = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
   const parser = new PDFParse({ data });
   const result = await parser.getText();
@@ -467,14 +467,9 @@ var parseReportPage = (html) => {
   };
 };
 var isValidReportUrl = (url) => url?.includes("hub.pipa.org.uk") ?? false;
-var checkForRedirect = (response) => {
+var getRedirectUrl = (response) => {
   if (response.status >= 300 && response.status < 400) {
-    return {
-      found: false,
-      isPdf: true,
-      redirectUrl: response.headers.get("location") ?? undefined,
-      error: "Report is a PDF download, not an HTML page"
-    };
+    return response.headers.get("location");
   }
   return null;
 };
@@ -487,13 +482,16 @@ var fetchReport = async (reportUrl, options = {}) => {
     return { found: false, error: "Invalid report URL" };
   }
   const fetcher = options.fetcher ?? fetch;
-  const response = await fetcher(reportUrl, {
+  let response = await fetcher(reportUrl, {
     headers: { "User-Agent": USER_AGENT },
     redirect: "manual"
   });
-  const redirectResult = checkForRedirect(response);
-  if (redirectResult)
-    return redirectResult;
+  const redirectUrl = getRedirectUrl(response);
+  if (redirectUrl) {
+    response = await fetcher(redirectUrl, {
+      headers: { "User-Agent": USER_AGENT }
+    });
+  }
   if (!response.ok) {
     return { found: false, error: `Report fetch error: ${response.status}` };
   }
